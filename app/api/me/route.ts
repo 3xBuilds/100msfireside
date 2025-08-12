@@ -29,13 +29,11 @@ export async function GET(request: Request) {
     );
   }
 
-  const res = await fetch(
-      `https://api.farcaster.xyz/fc/primary-address?fid=${fid}&protocol=ethereum`,
-    )
-
-    if (res.ok) {
-      const { result } = await res.json()
-      console.log("Primary address result:", result);
-      return NextResponse.json({ user : result.address })
-    }
+  // Return the FID which is what the middleware expects
+  return NextResponse.json({ 
+    user: { 
+      fid: fid.toString(),
+      address: null // We can add address later if needed
+    } 
+  });
 }

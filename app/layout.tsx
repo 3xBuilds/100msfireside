@@ -3,6 +3,7 @@ import "../styles/globals.css";
 import { ReactNode } from "react";
 import { Metadata } from "next";
 import Providers from "@/utils/providers/providers";
+import BottomNavigation from "@/components/BottomNavigation";
 
 export async function generateMetadata(): Promise<Metadata> {
   const URL = process.env.NEXT_PUBLIC_URL || 'http://localhost:3000';
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
       <body>
         <Providers>
           {children}
+          <BottomNavigation />
         </Providers>
       </body>
     </html>

@@ -15,6 +15,8 @@ import { generateNonce } from "@farcaster/auth-client";
 interface GlobalContextProps {
   user: any;
   setUser: (value: any) => void;
+  token: string | null;
+  setToken: (value: string | null) => void;
 }
 
 const GlobalContext = createContext<GlobalContextProps | undefined>(undefined);
@@ -22,6 +24,7 @@ const GlobalContext = createContext<GlobalContextProps | undefined>(undefined);
 export function GlobalProvider({ children }: { children: ReactNode }) {
 
   const [user, setUser] = useState<any>(null);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -32,6 +35,16 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
       // } else {
       //   setUser(JSON.parse(sessionUser));
       // }
+      if(process.env.NODE_ENV === "development") {
+        setUser({
+          fid: "1175855",
+          username: "sayak",
+          displayName: "Sayak",
+          pfp_url: "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/bb40b218-dc29-47c8-91fa-8f4c7d16b400/original",
+        });
+        setToken("test");
+        return;
+      }
       await handleSignIn()
       sdk.actions.ready();
     })();
@@ -57,6 +70,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
       await sdk.actions.signIn({ nonce });
 
       const {token} = await sdk.quickAuth.getToken()
+      setToken(token);
 
       const createUserRes = await fetch(
           `${process.env.NEXT_PUBLIC_URL}/api/protected/handleUser`,
@@ -79,7 +93,7 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
   }, [getNonce]);
 
   return (
-    <GlobalContext.Provider value={{ user, setUser }}>
+    <GlobalContext.Provider value={{ user, setUser, token, setToken }}>
       {children}
     </GlobalContext.Provider>
   );

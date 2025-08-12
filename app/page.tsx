@@ -19,7 +19,7 @@ import { useMiniKit } from "@coinbase/onchainkit/minikit";
 const loadingStates = [HMSRoomState.Connecting, HMSRoomState.Disconnecting];
 
 export default function Home() {
-    const { setFrameReady, isFrameReady } = useMiniKit();
+  const { setFrameReady, isFrameReady } = useMiniKit();
   const [mounted, setMounted] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const isConnected = useHMSStore(selectIsConnectedToRoom);
@@ -28,15 +28,12 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true);
-    
     const handleUnload = () => {
       if (isConnected) {
         hmsActions.leave();
       }
     };
-
     window.onunload = handleUnload;
-    
     return () => {
       window.onunload = null;
     };
