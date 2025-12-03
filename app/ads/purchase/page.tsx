@@ -219,6 +219,7 @@ export default function PurchaseAdPage() {
           context?.client.clientFid !== 309857
             ? ethValueInWei
             : numberToHex(ethValueInWei),
+            
       };
 
       const revenue_call = {
@@ -290,7 +291,7 @@ export default function PurchaseAdPage() {
         return result;
       } else {
         toast.info("Please confirm the transaction in your wallet");
-        // @ts-ignore
+        
         const id = await sendCalls(config, { calls: sendingCalls });
 
         if (!id) {
