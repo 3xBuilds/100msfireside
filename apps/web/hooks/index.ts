@@ -10,3 +10,7 @@ export { usePlaylist, type PlaylistItem, type PlaybackState, type UsePlaylistOpt
 // Custom Audio Track hook - for one-shot sound effects (soundboard, notifications)
 export { useCustomAudioTrack, type AudioTrackItem, type UseCustomAudioTrackOptions, type UseCustomAudioTrackReturn } from './useCustomAudioTrack';
 
+// XMTP hooks - for decentralized messaging
+export { useXMTPClient } from './useXMTPClient';
+export { useXMTPConversation } from './useXMTPConversation';
+export { useXMTPMessages } from './useXMTPMessages';

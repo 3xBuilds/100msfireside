@@ -13,6 +13,8 @@ import { HMSAPI } from "../../services/hmsAPI";
 import { RedisRoomParticipantsService } from "../../services/redis";
 import { RedisTippingService } from "../../services/redis/tippingDetails";
 import { trackViewerJoin } from "../../services/ads/viewTracking";
+import { XMTPGroupManager, xmtpClientManager } from "../../services/xmtp";
+import { ensureXMTPKey } from "../../utils/xmtp-helpers";
 import { evaluateAutoAds, forceStopAds } from "../ads";
 import { announceFiresideLive, announceFiresideScheduled } from "../../services/xBot";
 import "../../config/database";
@@ -865,6 +867,30 @@ Retrieves all upcoming rooms hosted by the authenticated user.
                   );
                   await trackViewerJoin(roomId, hostUser.fid.toString());
                   console.log("Host added to Redis participants successfully");
+
+                  // Create XMTP group for the room if it's ongoing
+                  if (savedRoom.status === "ongoing") {
+                    try {
+                      // Get host's XMTP client (if available in cache)
+                      const hostFid = hostUser.fid.toString();
+                      const hostClient = xmtpClientManager.getClient(hostFid);
+                      
+                      if (hostClient) {
+                        const groupId = await XMTPGroupManager.createRoomGroup(
+                          hostClient,
+                          roomId,
+                          savedRoom.name,
+                          [] // Start with empty participants, they'll be added when they join
+                        );
+                        console.log(`Created XMTP group ${groupId} for room ${roomId}`);
+                      } else {
+                        console.log(`XMTP client not available for host, group will be created when host initializes XMTP`);
+                      }
+                    } catch (xmtpError) {
+                      console.error("Failed to create XMTP group:", xmtpError);
+                      // Don't fail room creation if XMTP fails
+                    }
+                  }
                 }
               } catch (redisError) {
                 console.error("Failed to add host to Redis:", redisError);

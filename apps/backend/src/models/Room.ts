@@ -28,6 +28,8 @@ const Room: Schema = new Schema({
   occurrenceNumber: { type: Number, default: null },
   // Recording preference
   recordingEnabled: { type: Boolean, default: true },
+  // XMTP group chat
+  xmtpGroupId: { type: String, required: false },
 }, {
   timestamps: true
 });

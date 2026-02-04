@@ -6,6 +6,7 @@ import { RedisRoomParticipantsService, RedisRoomStatisticsService } from '../../
 import { evaluateAutoAds, forceStopAds } from '../ads';
 import { trackViewerJoin, trackViewerLeave } from '../../services/ads/viewTracking';
 import { RewardService } from '../../services/rewards/RewardService';
+import { XMTPGroupManager, xmtpClientManager } from '../../services/xmtp';
 import {
   AddParticipantRequestSchema,
   UpdateParticipantRoleRequestSchema,
@@ -475,6 +476,29 @@ Removes a participant from the room (kick functionality).
           
           // Update peak participant counts
           await RedisRoomStatisticsService.updatePeakCounts(params.id);
+
+          // Add participant to XMTP group if it exists
+          try {
+            const groupId = await XMTPGroupManager.getGroupId(params.id);
+            if (groupId && user.wallet) {
+              // Try to get user's XMTP client from cache
+              const userClient = xmtpClientManager.getClient(userFid);
+              
+              if (userClient) {
+                await XMTPGroupManager.addParticipant(
+                  userClient,
+                  groupId,
+                  user.wallet
+                );
+                console.log(`Added user ${userFid} to XMTP group ${groupId}`);
+              } else {
+                console.log(`XMTP client not available for user ${userFid}, will be added when they initialize XMTP`);
+              }
+            }
+          } catch (xmtpError) {
+            console.error('Failed to add participant to XMTP group:', xmtpError);
+            // Don't fail room join if XMTP fails
+          }
 
           const participant = {
             userId: user.fid,

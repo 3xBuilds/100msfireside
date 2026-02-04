@@ -33,7 +33,8 @@ export class RedisUtils {
         participants: (roomId: string) => `room:${roomId}:participants`,
         roles: (roomId: string) => `room:${roomId}:roles`,
         status: (roomId: string) => `room:${roomId}:status`,
-        messages: (roomId: string) => `room:${roomId}:messages`
+        messages: (roomId: string) => `room:${roomId}:messages`,
+        xmtpGroup: (roomId: string) => `room:${roomId}:xmtp_group_id`
     };
 
     static messageKeys = {

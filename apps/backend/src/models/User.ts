@@ -31,7 +31,8 @@ const User: Schema = new Schema({
     totalRoomsHosted: { type: Number, default: 0 },
     totalParticipantsEngaged: { type: Number, default: 0 },
     lastRoomId: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' }
-  }
+  },
+  xmtpEncryptionKey: { type: String, required: false }
 },{
   timestamps: true
 });
