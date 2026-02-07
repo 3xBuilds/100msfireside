@@ -27,6 +27,7 @@ import {
 } from "@/utils/serverActions";
 import { useAccount } from "wagmi";
 import Overlays from "./Overlays";
+import { useXMTPClient } from "@/hooks";
 
 interface RoomCode {
   id: string;
@@ -55,6 +56,26 @@ export default function CallClient({ roomId }: CallClientProps) {
 
   const [isJoining, setIsJoining] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Initialize XMTP on backend when call starts
+  const { initialized: xmtpInitialized, inboxId: xmtpInboxId, isLoading: xmtpLoading, error: xmtpError, initializeClient: initXMTP } = useXMTPClient();
+
+  // Initialize XMTP on component mount (when user joins call)
+  useEffect(() => {
+    if (user && !xmtpInitialized && !xmtpLoading) {
+      initXMTP();
+    }
+  }, [user, xmtpInitialized, xmtpLoading, initXMTP]);
+
+  // Log XMTP initialization status
+  useEffect(() => {
+    if (xmtpInitialized && xmtpInboxId) {
+      console.log('[XMTP] Backend client initialized:', xmtpInboxId);
+    }
+    if (xmtpError) {
+      console.error('[XMTP] Initialization error:', xmtpError);
+    }
+  }, [xmtpInitialized, xmtpInboxId, xmtpError]);
 
   // Function to handle role limit reached error
   const handleRoleLimitError = async (hmsRoomId: string, userFid: number) => {

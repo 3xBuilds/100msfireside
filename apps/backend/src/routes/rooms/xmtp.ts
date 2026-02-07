@@ -243,4 +243,68 @@ Retrieves the list of members in the room's XMTP group.
           security: [{ bearerAuth: [] }]
         }
       })
+
+      // Initialize XMTP client endpoint (simplified - no wallet signature needed)
+      .post('/xmtp/init', async ({ headers, set }) => {
+        try {
+          const userFid = headers['x-user-fid'] as string;
+
+          if (!userFid) {
+            set.status = 401;
+            return errorResponse('Authentication required');
+          }
+
+          const user = await User.findOne({ fid: parseInt(userFid) });
+          if (!user) {
+            set.status = 404;
+            return errorResponse('User not found');
+          }
+
+          console.log(`[XMTP Init] Initializing client for user ${userFid}`);
+
+          const xmtpClient = await xmtpClientManager.getOrCreateClient(userFid);
+
+          return successResponse({
+            inboxId: xmtpClient.inboxId,
+            initialized: true,
+          }, 'XMTP client initialized successfully');
+        } catch (error) {
+          console.error('Error initializing XMTP client:', error);
+          set.status = 500;
+          return errorResponse('Failed to initialize XMTP client');
+        }
+      }, {
+        response: {
+          200: t.Object({
+            success: t.Boolean(),
+            data: t.Object({
+              inboxId: t.String(),
+              initialized: t.Boolean()
+            }),
+            message: t.String()
+          }),
+          401: ErrorResponse,
+          404: ErrorResponse,
+          500: ErrorResponse
+        },
+        detail: {
+          tags: ['XMTP'],
+          summary: 'Initialize XMTP Client',
+          description: `
+Initializes XMTP client for the authenticated user using backend signing.
+
+**Required:**
+- User must be authenticated
+
+**Response:**
+- \`inboxId\`: XMTP inbox ID for the user
+- \`initialized\`: Boolean indicating successful initialization
+
+**Note:** This endpoint uses backend private key for signing, no wallet signature required from user.
+
+**Authentication Required:** Yes (Farcaster JWT)
+          `,
+          security: [{ bearerAuth: [] }]
+        }
+      })
   );

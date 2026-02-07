@@ -1,4 +1,5 @@
-import { Client, type Signer } from '@xmtp/node-sdk';
+import { Client, type Signer, IdentifierKind } from '@xmtp/node-sdk';
+import { Wallet } from 'ethers';
 import { hexToBytes } from '../../utils/xmtp-helpers';
 
 /**
@@ -9,21 +10,31 @@ class XMTPClientManager {
   private clients: Map<string, Client> = new Map();
   private clientTimestamps: Map<string, number> = new Map();
   private readonly SESSION_TIMEOUT = 3600000; // 1 hour in milliseconds
+  private wallet: Wallet | null = null;
+
+  constructor() {
+    // Initialize wallet from private key on startup
+    const privateKey = process.env.XMTP_PRIVATE_KEY;
+    if (privateKey) {
+      this.wallet = new Wallet(privateKey);
+      console.log('[XMTP] Initialized with wallet address:', this.wallet.address);
+    } else {
+      console.warn('[XMTP] No private key configured. Set XMTP_PRIVATE_KEY environment variable.');
+    }
+  }
 
   /**
    * Get or create XMTP client for a user
    * @param userFid - User's Farcaster ID
-   * @param walletAddress - User's connected wallet address
-   * @param encryptionKey - User's XMTP encryption key (hex string)
-   * @param signMessage - Function to sign messages (from frontend wallet)
    * @returns XMTP Client instance
    */
   async getOrCreateClient(
-    userFid: string,
-    walletAddress: string,
-    encryptionKey: string,
-    signMessage: (message: string) => Promise<string>
+    userFid: string
   ): Promise<Client> {
+    if (!this.wallet) {
+      throw new Error('XMTP wallet not initialized. Set XMTP_PRIVATE_KEY environment variable.');
+    }
+
     // Check if we have a valid cached client
     const cachedClient = this.clients.get(userFid);
     const timestamp = this.clientTimestamps.get(userFid);
@@ -35,7 +46,7 @@ class XMTPClientManager {
     }
 
     // Create new client
-    const client = await this.createClient(walletAddress, encryptionKey, signMessage);
+    const client = await this.createClient();
     
     // Cache it
     this.clients.set(userFid, client);
@@ -45,23 +56,23 @@ class XMTPClientManager {
   }
 
   /**
-   * Create a new XMTP client
-   * @param walletAddress - User's wallet address
-   * @param encryptionKey - Encryption key (hex string)
-   * @param signMessage - Function to sign messages
+   * Create a new XMTP client using backend private key
    * @returns New XMTP Client instance
    */
-  private async createClient(
-    walletAddress: string,
-    encryptionKey: string,
-    signMessage: (message: string) => Promise<string>
-  ): Promise<Client> {
-    // Create signer from wallet
+  private async createClient(): Promise<Client> {
+    if (!this.wallet) {
+      throw new Error('XMTP wallet not initialized');
+    }
+
+    // Create signer from backend wallet (Node SDK format)
     const signer: Signer = {
-      getAddress: () => walletAddress.toLowerCase(),
-      signMessage: async (message: string) => {
-        // Frontend will provide the signature as hex string
-        const signature = await signMessage(message);
+      type: 'EOA',
+      getIdentifier: () => ({
+        identifier: this.wallet!.address.toLowerCase(),
+        identifierKind: IdentifierKind.Ethereum,
+      }),
+      signMessage: async (message: string): Promise<Uint8Array> => {
+        const signature = await this.wallet!.signMessage(message);
         return hexToBytes(signature);
       }
     };
@@ -71,8 +82,10 @@ class XMTPClientManager {
 
     // Create XMTP client
     const client = await Client.create(signer, {
-      env: process.env.XMTP_ENV === 'production' ? 'production' : 'dev',
-      dbEncryptionKey,
+      eUse a consistent encryption key from environment or generate one
+    const dbEncryptionKeyHex = process.env.XMTP_DB_ENCRYPTION_KEY || 
+      '0000000000000000000000000000000000000000000000000000000000000000';
+    const dbEncryptionKey = hexToBytes(dbEncryptionKeyHex
       appVersion: 'fireside/1.0',
     });
 
