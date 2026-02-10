@@ -117,7 +117,10 @@ export async function createXMTPGroup(
     // Create optimistic group (stays local until members are added)
     const group = await client.conversations.createGroupOptimistic();
 
-    console.log(`✅ XMTP optimistic group created: ${group.id} for room ${roomId}`);
+    // Sync the group to ensure it's properly initialized
+    await group.sync();
+    
+    console.log(`✅ XMTP optimistic group created and synced: ${group.id} for room ${roomId}`);
     
     return group.id;
   } catch (error) {
@@ -138,11 +141,17 @@ export async function addMemberToGroup(
   memberInboxId: string
 ): Promise<void> {
   try {
+    // Sync conversations first to ensure we have the latest list
+    console.log(`🔄 Syncing conversations for group ${groupId}...`);
+    await client.conversations.syncAll();
+    
     // Find the group
     const conversations = await client.conversations.list();
+    console.log(`🔍 Searching for group ${groupId} among ${conversations.length} conversations...`);
     const group = conversations.find(conv => conv.id === groupId);
 
     if (!group) {
+      console.error(`❌ Group ${groupId} not found. Available conversations:`, conversations.map(c => c.id));
       throw new Error(`Group ${groupId} not found`);
     }
 
@@ -183,6 +192,9 @@ export async function addMembersWithAddresses(
   addresses: string[]
 ): Promise<void> {
   try {
+    // Sync conversations first to ensure we have the latest list
+    await client.conversations.syncAll();
+    
     // Find the group
     const conversations = await client.conversations.list();
     const group = conversations.find(conv => conv.id === groupId);
@@ -312,6 +324,9 @@ export async function getGroupById(
   groupId: string
 ): Promise<any> {
   try {
+    // Sync conversations first to ensure we have the latest list
+    await client.conversations.syncAll();
+    
     const conversations = await client.conversations.list();
     const group = conversations.find(conv => conv.id === groupId);
 
