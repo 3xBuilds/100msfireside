@@ -17,6 +17,7 @@ const Room: Schema = new Schema({
     default: 'upcoming' 
   },
   roomId: { type: String, default: "" }, // HMS Room ID
+  xmtpGroupId: { type: String, default: null }, // XMTP Group Conversation ID
   interested: [{ type: mongoose.Schema.Types.ObjectId, default: [] }], // Array of user FIDs who showed interest
   participants: [{ type: mongoose.Schema.Types.ObjectId, default: [] }], // Array of user FIDs who participated
   topics: [{ type: String, default: [] }],

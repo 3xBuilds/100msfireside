@@ -76,7 +76,6 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
   }
 
   const handleSignIn = async (): Promise<void> => {
-    console.log("handleSignIn called", new Date().toISOString());
     try {
       const env = process.env.NEXT_PUBLIC_ENV;
       var token: any;
@@ -111,6 +110,12 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
       if(context){
         localUser.pfp_url = context.user.pfpUrl;
         localUser.username = context?.user.username;
+      }
+      
+      // Add wallet address from wagmi if not present
+      if (address && !localUser.wallet) {
+        localUser.wallet = address;
+        console.log("Added wallet address to user:", address);
       }
       
       setUser(localUser);

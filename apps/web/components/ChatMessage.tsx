@@ -1,57 +1,24 @@
 'use client'
 
-import { HMSMessage } from "@100mslive/react-sdk";
 import { formatDistanceToNow } from "./utils/timeUtils";
 import { ReplyPreview } from "./ReplyPreview";
 import { useRef, useState } from "react";
+import type { FormattedMessage } from "@/utils/xmtp/messageHelpers";
 
 interface ChatMessageProps {
-  message: HMSMessage | RedisChatMessage;
-  isOwnMessage: boolean;
-  onSelectForReply?: (message: RedisChatMessage) => void;
-  onScrollToMessage?: (messageId: string) => void;
+  message: FormattedMessage;
+  currentUserFid: string;
+  onReply?: (message: FormattedMessage) => void;
+  onScrollToReply?: (messageId: string) => void;
   isSelected?: boolean;
 }
 
-export function ChatMessage({ message, isOwnMessage, onSelectForReply, onScrollToMessage, isSelected = false }: ChatMessageProps) {
+export function ChatMessage({ message, currentUserFid, onReply, onScrollToReply, isSelected = false }: ChatMessageProps) {
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
   
-  const isRedisMessage = 'userId' in message;
-
-  // Get sender name based on message type
-  const getSenderName = () => {
-    if (isRedisMessage) {
-      const redisMsg = message as RedisChatMessage;
-      return redisMsg.displayName || 'Anonymous';
-    } else {
-      const hmsMsg = message as HMSMessage;
-      return hmsMsg.senderName || 
-             hmsMsg.sender || 
-             (hmsMsg as any).senderUserId ||
-             'Anonymous';
-    }
-  };
-  
-  const senderName = getSenderName();
-  
-  // Get message text
-  const getMessageText = () => {
-    if (isRedisMessage) {
-      return (message as RedisChatMessage).message;
-    } else {
-      return (message as HMSMessage).message;
-    }
-  };
-  
-  // Get timestamp
-  const getTimestamp = () => {
-    if (isRedisMessage) {
-      return new Date((message as RedisChatMessage).timestamp);
-    } else {
-      return (message as HMSMessage).time;
-    }
-  };
+  const isOwnMessage = message.userId === currentUserFid;
+  const senderName = message.displayName || message.username || 'Anonymous';
   
   const getInitials = (name: string) => {
     return name
@@ -70,7 +37,7 @@ export function ChatMessage({ message, isOwnMessage, onSelectForReply, onScrollT
       'bg-gradient-to-br from-fireside-purple to-fireside-orange',
       'bg-gradient-to-br from-pink-400 to-purple-500',
       'bg-gradient-to-br from-blue-400 to-indigo-500',
-    ];
+   ];
     
     let hash = 0;
     for (let i = 0; i < name.length; i++) {
@@ -79,66 +46,14 @@ export function ChatMessage({ message, isOwnMessage, onSelectForReply, onScrollT
     return colors[Math.abs(hash) % colors.length];
   };
 
-  // Get profile picture URL
-  const getPfpUrl = () => {
-    if (isRedisMessage) {
-      return (message as RedisChatMessage).pfp_url || '';
-    } else {
-      // For HMS messages, try to extract pfp_url from parsed metadata
-      const hmsMsg = message as HMSMessage;
-      try {
-        const parsedMsg = JSON.parse(hmsMsg.message);
-        return parsedMsg.pfp_url || '';
-      } catch (e) {
-        return '';
-      }
-    }
-  };
-
-  const pfpUrl = getPfpUrl();
-
-  // Convert HMS message to RedisChatMessage format for selection
-  const convertToRedisFormat = (): RedisChatMessage => {
-    if (isRedisMessage) {
-      return message as RedisChatMessage;
-    }
-    
-    const hmsMsg = message as HMSMessage;
-    let messageText = hmsMsg.message;
-    let messageFid = '';
-    let messagePfpUrl = '';
-    let messageUsername = '';
-    let messageDisplayName = '';
-    
-    try {
-      const parsedMsg = JSON.parse(hmsMsg.message);
-      messageText = parsedMsg.text;
-      messageFid = parsedMsg.userFid || '';
-      messagePfpUrl = parsedMsg.pfp_url || '';
-      messageUsername = parsedMsg.username || '';
-      messageDisplayName = parsedMsg.displayName || '';
-    } catch (e) {
-      messageText = hmsMsg.message;
-    }
-    
-    return {
-      id: `hms_${hmsMsg.id}`,
-      roomId: '',
-      userId: messageFid,
-      username: messageUsername || hmsMsg.senderName || 'Unknown',
-      displayName: messageDisplayName || hmsMsg.senderName || 'Unknown',
-      pfp_url: messagePfpUrl,
-      message: messageText,
-      timestamp: hmsMsg.time.toISOString()
-    };
-  };
+  const timestamp = new Date(message.timestamp);
 
   // Long press handlers
   const handleTouchStart = () => {
     setIsLongPressing(true);
     longPressTimerRef.current = setTimeout(() => {
-      if (onSelectForReply) {
-        onSelectForReply(convertToRedisFormat());
+      if (onReply) {
+        onReply(message);
         // Haptic feedback on mobile
         if (navigator.vibrate) {
           navigator.vibrate(50);
@@ -159,25 +74,15 @@ export function ChatMessage({ message, isOwnMessage, onSelectForReply, onScrollT
   // Desktop click handler for reply selection
   const handleClick = (e: React.MouseEvent) => {
     // Only handle if Ctrl/Cmd key is pressed (desktop pattern)
-    if ((e.ctrlKey || e.metaKey) && onSelectForReply) {
-      onSelectForReply(convertToRedisFormat());
+    if ((e.ctrlKey || e.metaKey) && onReply) {
+      onReply(message);
     }
   };
-
-  // Get replyTo data if it exists
-  const getReplyTo = () => {
-    if (isRedisMessage) {
-      return (message as RedisChatMessage).replyTo;
-    }
-    return undefined;
-  };
-
-  const replyTo = getReplyTo();
 
   return (
     <div 
       className={`chat-message p-2 ${isOwnMessage ? 'own-message' : 'other-message'} ${isSelected ? 'bg-white/5 rounded-lg' : ''} ${isLongPressing ? 'opacity-70' : ''}`}
-      id={`message-${isRedisMessage ? (message as RedisChatMessage).id : `hms_${(message as HMSMessage).id}`}`}
+      id={`message-${message.id}`}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
@@ -185,10 +90,10 @@ export function ChatMessage({ message, isOwnMessage, onSelectForReply, onScrollT
     >
       {!isOwnMessage && (
         <div className="chat-avatar flex-shrink-0">
-          {pfpUrl ? (
+          {message.pfp_url ? (
             <>
               <img 
-                src={pfpUrl} 
+                src={message.pfp_url} 
                 alt={senderName}
                 className="w-8 h-8 rounded-full object-cover"
                 onError={(e) => {
@@ -219,25 +124,23 @@ export function ChatMessage({ message, isOwnMessage, onSelectForReply, onScrollT
         )}
         
         <div className={`chat-message-bubble ${isOwnMessage ? 'own-bubble' : 'other-bubble'}`}>
-          {replyTo && (
+          {message.replyTo && (
             <ReplyPreview
-              replyTo={replyTo}
+              replyTo={message.replyTo}
               variant="inline"
               onClick={() => {
-                if (onScrollToMessage) {
-                  onScrollToMessage(replyTo.messageId);
+                if (onScrollToReply && message.replyTo) {
+                  onScrollToReply(message.replyTo.messageId);
                 }
               }}
             />
           )}
           <p className="text-sm text-left leading-relaxed whitespace-pre-wrap break-words">
-            {getMessageText()}
+            {message.message}
           </p>
-          {(
-            <div className={`text-xs mt-1 text-white/40 text-right`}>
-              {formatDistanceToNow(getTimestamp())}
-            </div>
-          )}
+          <div className={`text-xs mt-1 text-white/40 text-right`}>
+            {formatDistanceToNow(timestamp)}
+          </div>
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ import { RedisTippingService } from "../../services/redis/tippingDetails";
 import { trackViewerJoin } from "../../services/ads/viewTracking";
 import { evaluateAutoAds, forceStopAds } from "../ads";
 import { announceFiresideLive, announceFiresideScheduled } from "../../services/xBot";
+import { getSystemClient, createXMTPGroup } from "../../services/xmtp";
 import "../../config/database";
 import { 
   GetRoomsResponseSchema, 
@@ -855,6 +856,27 @@ Retrieves all upcoming rooms hosted by the authenticated user.
                 );
               }
 
+              // Create XMTP group for the room
+              if (savedRoom) {
+                try {
+                  console.log(`Creating XMTP group for room ${savedRoom._id}...`);
+                  const xmtpClient = await getSystemClient();
+                  const groupId = await createXMTPGroup(
+                    xmtpClient,
+                    savedRoom._id.toString()
+                  );
+                  
+                  // Update room with XMTP group ID
+                  savedRoom.xmtpGroupId = groupId;
+                  await savedRoom.save();
+                  
+                  console.log(`✅ XMTP group ${groupId} created for room ${savedRoom._id}`);
+                } catch (xmtpError) {
+                  // Don't fail room creation if XMTP fails
+                  console.error('Failed to create XMTP group:', xmtpError);
+                }
+              }
+
               try {
                 if (savedRoom) {
                   const roomId = savedRoom._id.toString();
@@ -1163,6 +1185,27 @@ Starts recording for an ongoing room and updates the recordingEnabled flag.
               },
               { new: true }
             ).populate("host", "fid username displayName pfp_url");
+
+            // Create XMTP group if not already created
+            if (updatedRoom && !updatedRoom.xmtpGroupId) {
+              try {
+                console.log(`Creating XMTP group for started room ${updatedRoom._id}...`);
+                const xmtpClient = await getSystemClient();
+                const groupId = await createXMTPGroup(
+                  xmtpClient,
+                  updatedRoom._id.toString()
+                );
+                
+                // Update room with XMTP group ID
+                updatedRoom.xmtpGroupId = groupId;
+                await updatedRoom.save();
+                
+                console.log(`✅ XMTP group ${groupId} created for room ${updatedRoom._id}`);
+              } catch (xmtpError) {
+                // Don't fail room start if XMTP fails
+                console.error('Failed to create XMTP group:', xmtpError);
+              }
+            }
 
             console.log(
               `[Room Start] Successfully started room ${params.roomId} with HMS ID: ${hmsRoom.id}`

@@ -61,6 +61,7 @@ export const RoomSchema = t.Object({
     t.Literal('ended')
   ]),
   roomId: t.String(),
+  xmtpGroupId: t.Optional(t.Union([t.String(), t.Null()])),
   interested: t.Array(t.String()),
   topics: t.Optional(t.Array(t.String())),
   isRecurring: t.Optional(t.Boolean()),

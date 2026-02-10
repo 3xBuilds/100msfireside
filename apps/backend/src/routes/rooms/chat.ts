@@ -4,6 +4,8 @@ import Room from '../../models/Room';
 import { RedisChatService, RedisRoomParticipantsService } from '../../services/redis';
 import { errorResponse, successResponse } from '../../utils';
 import { authMiddleware } from '../../middleware/auth';
+import { getSystemClient, addMemberToGroup, canMessage, getInboxIdFromAddress } from '../../services/xmtp';
+import { IdentifierKind } from '@xmtp/node-sdk';
 import { 
   GetMessagesResponseSchema, 
   SendMessageResponseSchema,
@@ -259,6 +261,146 @@ Deletes all chat messages for a room.
 - Privacy compliance
 
 **Warning:** This action is irreversible. All messages for the room will be permanently deleted.
+
+**Authentication Required:** Yes (Farcaster JWT)
+          `,
+          security: [{ bearerAuth: [] }]
+        }
+      })
+  )
+  .group('/protected', (app) =>
+    app
+      .use(authMiddleware)
+      
+      // Get XMTP group info for a room
+      .get('/:id/xmtp-group', async ({ params, set }) => {
+        try {
+          const room = await Room.findById(params.id);
+          
+          if (!room) {
+            set.status = 404;
+            return errorResponse('Room not found');
+          }
+
+          return successResponse({
+            xmtpGroupId: room.xmtpGroupId || null,
+            exists: !!room.xmtpGroupId
+          });
+        } catch (error) {
+          console.error('Error fetching XMTP group:', error);
+          set.status = 500;
+          return errorResponse('Failed to fetch XMTP group information');
+        }
+      }, {
+        detail: {
+          tags: ['Chat'],
+          summary: 'Get XMTP Group Information',
+          description: `
+Retrieves the XMTP group conversation ID for a room.
+
+**Returns:**
+- \`xmtpGroupId\`: The XMTP group conversation ID (or null if not created yet)
+- \`exists\`: Boolean indicating if an XMTP group exists for this room
+
+**Authentication Required:** Yes (Farcaster JWT)
+          `,
+          security: [{ bearerAuth: [] }]
+        }
+      })
+
+      // Add member to XMTP group
+      .post('/:id/xmtp-add-member', async ({ params, headers, body, set }) => {
+        try {
+          const userFid = headers['x-user-fid'] as string;
+          const { wallet } = body;
+          
+          if (!userFid) {
+            set.status = 401;
+            return errorResponse('User authentication required');
+          }
+
+          if (!wallet) {
+            set.status = 400;
+            return errorResponse('Wallet address is required');
+          }
+
+          const room = await Room.findById(params.id);
+          if (!room) {
+            set.status = 404;
+            return errorResponse('Room not found');
+          }
+
+          if (!room.xmtpGroupId) {
+            set.status = 400;
+            return errorResponse('XMTP group not created for this room yet');
+          }
+
+          // Check if user can receive XMTP messages
+          const xmtpClient = await getSystemClient();
+          const canReceive = await canMessage(xmtpClient, [wallet]);
+
+          console.log('Checking if user wallet can receive XMTP messages:', wallet, canReceive.get(wallet.toLowerCase()));
+          
+          if (!canReceive.get(wallet.toLowerCase())) {
+            set.status = 400;
+            return errorResponse('Your wallet is not registered on the XMTP network. Please open the chat in the app to complete registration by signing the initialization message.');
+          }
+
+          // Get user's inbox ID from their wallet address
+          const userInboxId = await getInboxIdFromAddress(xmtpClient, wallet);
+          
+          if (!userInboxId) {
+            set.status = 400;
+            return errorResponse('Unable to retrieve inbox ID for your wallet. Please ensure you have initialized XMTP by opening the chat.');
+          }
+
+          // Add member to group
+          await addMemberToGroup(xmtpClient, room.xmtpGroupId, userInboxId);
+
+          return successResponse({
+            message: 'Successfully added to XMTP group',
+            groupId: room.xmtpGroupId
+          });
+        } catch (error: any) {
+          console.error('Error adding member to XMTP group:', error);
+          
+          // Don't fail if user is already a member
+          if (error.message?.includes('already in group')) {
+            return successResponse({
+              message: 'User already in XMTP group',
+              groupId: (await Room.findById(params.id))?.xmtpGroupId
+            });
+          }
+          
+          set.status = 500;
+          return errorResponse('Failed to add member to XMTP group');
+        }
+      }, {
+        body: t.Object({
+          wallet: t.String({ 
+            description: 'Ethereum wallet address of the user to add to the group' 
+          })
+        }),
+        detail: {
+          tags: ['Chat'],
+          summary: 'Add Member to XMTP Group',
+          description: `
+Adds the authenticated user to the room's XMTP group chat.
+
+**Requirements:**
+- User must have an XMTP-compatible wallet
+- Room must have an XMTP group created
+- User wallet must be XMTP-enabled (canMessage check)
+
+**Request Body:**
+- \`wallet\`: Ethereum wallet address of the user
+
+**Process:**
+1. Validates user can receive XMTP messages
+2. Retrieves user's inbox ID from wallet address
+3. Adds user to the XMTP group conversation
+
+**Idempotent:** Safe to call multiple times for the same user.
 
 **Authentication Required:** Yes (Farcaster JWT)
           `,

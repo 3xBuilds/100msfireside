@@ -9,6 +9,7 @@ import "react-toastify/dist/ReactToastify.css";
 import WagmiQueryProvider from "./wagmiQueryProvider";
 import { GlobalProvider } from "./globalContext";
 import { initViewportFix } from "../viewport";
+import { XMTPProvider } from "@/contexts/XMTPContext";
 
 interface ProvidersProps {
   children: ReactNode;
@@ -32,7 +33,9 @@ export default function Providers({ children }: ProvidersProps) {
       >
         <GlobalProvider>
         <WagmiQueryProvider>
-          <HMSRoomProvider>{children}</HMSRoomProvider>
+          <XMTPProvider>
+            <HMSRoomProvider>{children}</HMSRoomProvider>
+          </XMTPProvider>
         </WagmiQueryProvider>
         </GlobalProvider>
       </MiniKitProvider>

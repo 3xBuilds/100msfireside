@@ -695,3 +695,26 @@ export async function claimLoginReward(token: string | null = null) {
     authToken: token
   });
 }
+
+/**
+ * Get XMTP group information for a room
+ */
+export async function getXMTPGroupInfo(roomId: string, token: string | null = null) {
+  const URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  return fetchAPI(`${URL}/api/rooms/protected/${roomId}/xmtp-group`, {
+    method: 'GET',
+    authToken: token
+  });
+}
+
+/**
+ * Add current user to XMTP group
+ */
+export async function addMemberToXMTPGroup(roomId: string, wallet: string, token: string | null = null) {
+  const URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  return fetchAPI(`${URL}/api/rooms/protected/${roomId}/xmtp-add-member`, {
+    method: 'POST',
+    body: { wallet },
+    authToken: token
+  });
+}
