@@ -22,6 +22,8 @@ import {
   DrawerFooter,
   DrawerTitle,
 } from "@/components/UI/drawer";
+import { Client } from '@xmtp/browser-sdk';
+import { useXMTPSigner } from '@/hooks';
 
 interface ChatProps {
   isOpen: boolean;
@@ -40,6 +42,34 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
   const messages = useHMSStore(selectHMSMessages);
   const hmsActions = useHMSActions();
   const { user } = useGlobalContext();
+
+  // XMTP integration
+  const { signer, isLoading: signerLoading, error: signerError } = useXMTPSigner();
+  const [xmtpClient, setXmtpClient] = useState<Client | null>(null);
+  const [isXmtpInitializing, setIsXmtpInitializing] = useState(false);
+
+  // Initialize XMTP client when signer is available
+  useEffect(() => {
+    async function initializeXMTP() {
+      if (!signer || xmtpClient || isXmtpInitializing) return;
+
+      setIsXmtpInitializing(true);
+      try {
+        console.log('🔄 Initializing XMTP client...');
+        const client = await Client.create(signer, {
+          env: 'production',
+        });
+        setXmtpClient(client);
+        console.log('✅ XMTP client initialized:', client.inboxId);
+      } catch (error) {
+        console.error('❌ Failed to initialize XMTP client:', error);
+      } finally {
+        setIsXmtpInitializing(false);
+      }
+    }
+
+    initializeXMTP();
+  }, [signer, xmtpClient, isXmtpInitializing]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback(() => {
