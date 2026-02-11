@@ -116,7 +116,12 @@ export async function createXMTPGroup(
   try {
     // Create optimistic group (stays local until members are added)
     const group = await client.conversations.createGroupOptimistic();
+    const inboxid = await getInboxIdFromAddress(client, "0x1ce256752fBa067675F09291d12A1f069f34f5e8"); // Force local ID generation
 
+    if(inboxid){
+await group.addMembers([inboxid]); // Add a dummy member to trigger network sync and ID generation
+    }
+    
     // Sync the group to ensure it's properly initialized
     await group.sync();
     
