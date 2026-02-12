@@ -46,9 +46,17 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (isLoading || client) {
-      console.log('⏭️ Skipping initialization - already initializing or initialized');
+    if (isLoading) {
+      console.log('⏭️ Skipping initialization - already initializing');
       return;
+    }
+
+    // Clear existing client if any
+    if (client) {
+      console.log('🔄 Clearing existing client for re-initialization');
+      setClient(null);
+      setCurrentGroup(null);
+      setMessages([]);
     }
 
     setIsLoading(true);
@@ -94,7 +102,7 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
       });
 
       setClient(xmtpClient);
-      console.log('✅ XMTP client initialized successfully. Inbox ID:', xmtpClient.inboxId);
+      console.log('✅ XMTP client initialized succesInbox ID:', xmtpClient.inboxId);
     } catch (err: any) {
       console.error('❌ Failed to initialize XMTP client:', err);
       setError(err instanceof Error ? err : new Error('Failed to initialize XMTP client'));

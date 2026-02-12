@@ -335,15 +335,16 @@ Retrieves the XMTP group conversation ID for a room.
             return errorResponse('XMTP group not created for this room yet');
           }
 
-          // Check if user can receive XMTP messages
           const xmtpClient = await getSystemClient();
+
+          // Check if user can receive XMTP messages
           const canReceive = await canMessage(xmtpClient, [wallet]);
 
           console.log('Checking if user wallet can receive XMTP messages:', wallet, canReceive.get(wallet.toLowerCase()));
           
           if (!canReceive.get(wallet.toLowerCase())) {
             set.status = 400;
-            return errorResponse('Your wallet is not registered on the XMTP network. Please open the chat in the app to complete registration by signing the initialization message.');
+            return errorResponse('Wallet not registered on XMTP network. Please ensure XMTP client is initialized first.');
           }
 
           // Get user's inbox ID from their wallet address
@@ -351,7 +352,7 @@ Retrieves the XMTP group conversation ID for a room.
           
           if (!userInboxId) {
             set.status = 400;
-            return errorResponse('Unable to retrieve inbox ID for your wallet. Please ensure you have initialized XMTP by opening the chat.');
+            return errorResponse('Unable to retrieve inbox ID. Wallet may not be registered on XMTP network.');
           }
 
           // Add member to group

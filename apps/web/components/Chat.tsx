@@ -45,6 +45,7 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
     messages: xmtpMessages, 
     isLoading: xmtpLoading, 
     error: xmtpError,
+    initializeClient,
     joinGroup,
     sendMessage: sendXMTPMessage,
     sendReply,
@@ -127,8 +128,9 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
             }, 2000);
           } else {
             const errorMsg = addMemberResponse.data?.error || addMemberResponse.data?.message || 'Failed to join chat';
-            if (errorMsg.includes('not registered on the XMTP network')) {
-              toast.error('Please complete XMTP registration by signing the message prompt');
+            if (errorMsg.includes('not registered') || errorMsg.includes('XMTP network') || errorMsg.includes('Wallet not registered')) {
+              toast.error('Initializing XMTP. Please sign the message...');
+              await initializeClient();
             } else {
               toast.error(errorMsg);
             }
@@ -138,8 +140,9 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
         }
       } catch (error: any) {
         console.error('❌ Failed to setup XMTP chat:', error);
-        if (error?.message?.includes('not registered') || error?.message?.includes('XMTP network')) {
-          toast.error('XMTP registration required. Please sign the initialization message.');
+        if (error?.message?.includes('not registered') || error?.message?.includes('XMTP network') || error?.message?.includes('Wallet not registered')) {
+          toast.error('Initializing XMTP. Please sign the message...');
+          await initializeClient();
         } else {
           toast.error('Unable to connect to chat');
         }

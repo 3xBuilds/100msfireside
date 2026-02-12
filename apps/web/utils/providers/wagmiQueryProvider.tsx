@@ -21,7 +21,9 @@ import {
 } from "@tanstack/react-query";
 import { ReactNode } from 'react';
 
-export const config = createConfig({
+export const config = getDefaultConfig({
+  appName: 'Fireside',
+  projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID || 'YOUR_PROJECT_ID',
   chains: [base],
   transports: {
     [base.id]: http(),
@@ -35,9 +37,9 @@ const WagmiQueryProvider = ({ children }:{children:ReactNode}) => {
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        
+        <RainbowKitProvider>
           {children}
-       
+        </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
