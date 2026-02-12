@@ -6,8 +6,6 @@ import { ethers } from 'ethers';
  * Uses a system wallet to create and manage groups on behalf of rooms
  */
 
-// Cache for XMTP clients to avoid recreating them
-const clientCache = new Map<string, Client>();
 
 // Cache for created group conversations by group ID
 // This avoids issues with syncing newly created groups
@@ -78,11 +76,10 @@ export async function createXMTPClient(
 
   try {
     const client = await Client.create(signer, {
-      env: process.env.XMTP_ENV === 'dev' ? 'dev' : 'production',
+      env:'production',
       dbEncryptionKey,
     });
 
-    clientCache.set(cacheKey, client);
     console.log(`✅ XMTP client created for ${wallet.address}`);
     
     return client;
@@ -390,11 +387,3 @@ export async function getGroupById(
   }
 }
 
-/**
- * Clears the client and group caches (useful for testing or cleanup)
- */
-export function clearClientCache(): void {
-  clientCache.clear();
-  groupCache.clear();
-  console.log('XMTP client and group caches cleared');
-}
