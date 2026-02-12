@@ -4,6 +4,8 @@ import { formatDistanceToNow } from "./utils/timeUtils";
 import { ReplyPreview } from "./ReplyPreview";
 import { useRef, useState } from "react";
 import type { FormattedMessage } from "@/utils/xmtp/messageHelpers";
+import { MentionLink } from "./MentionLink";
+import type { MentionData } from "@/utils/mentions";
 
 interface ChatMessageProps {
   message: FormattedMessage;
@@ -44,6 +46,40 @@ export function ChatMessage({ message, currentUserFid, onReply, onScrollToReply,
       hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
+  };
+
+  // Render message with mentions
+  const renderMessageWithMentions = (text: string, mentions?: MentionData[]) => {
+    if (!mentions || mentions.length === 0) {
+      return text;
+    }
+
+    // Sort mentions by position
+    const sortedMentions = [...mentions].sort((a, b) => a.startIndex - b.startIndex);
+    
+    const elements: (string | React.ReactNode)[] = [];
+    let lastIndex = 0;
+
+    sortedMentions.forEach((mention, idx) => {
+      // Add text before mention
+      if (mention.startIndex > lastIndex) {
+        elements.push(text.slice(lastIndex, mention.startIndex));
+      }
+
+      // Add mention link
+      elements.push(
+        <MentionLink key={`mention-${idx}`} mention={mention} />
+      );
+
+      lastIndex = mention.startIndex + mention.length;
+    });
+
+    // Add remaining text after last mention
+    if (lastIndex < text.length) {
+      elements.push(text.slice(lastIndex));
+    }
+
+    return elements;
   };
 
   const timestamp = new Date(message.timestamp);
@@ -136,7 +172,7 @@ export function ChatMessage({ message, currentUserFid, onReply, onScrollToReply,
             />
           )}
           <p className="text-sm text-left leading-relaxed whitespace-pre-wrap break-words">
-            {message.message}
+            {renderMessageWithMentions(message.message, message.mentions)}
           </p>
           <div className={`text-xs mt-1 text-white/40 text-right`}>
             {formatDistanceToNow(timestamp)}

@@ -3,6 +3,8 @@
  * Utilities for formatting and handling XMTP messages in the UI
  */
 
+import type { MentionData } from '@/utils/mentions';
+
 /**
  * Sender metadata embedded in message content
  */
@@ -14,11 +16,18 @@ export interface SenderMetadata {
 }
 
 /**
- * Structured message content with sender metadata
+ * Enhanced message content with sender metadata and mentions
  */
 export interface MessageContent {
   text: string;
   sender: SenderMetadata;
+  mentions?: MentionData[];
+}
+
+/**
+ * Legacy structured message content with custom reply (for backward compatibility)
+ */
+export interface LegacyMessageContent extends MessageContent {
   reply?: {
     reference: string;
     text: string;
@@ -30,7 +39,8 @@ export interface MessageContent {
 export interface XMTPMessage {
   id: string;
   senderInboxId: string;
-  content: string | MessageContent; // Can be plain string (legacy) or structured content
+  content: any; // Can be plain string, structured content, or XMTP reply content
+  contentType?: { typeId: string; authorityId: string };
   sentAt: Date;
 }
 
@@ -42,6 +52,7 @@ export interface FormattedMessage {
   pfp_url: string;
   message: string;
   timestamp: string;
+  mentions?: MentionData[];
   replyTo?: {
     messageId: string;
     message: string;
@@ -96,26 +107,118 @@ export function formatXMTPMessage(
   xmtpMsg: XMTPMessage,
   currentUserInboxId?: string
 ): FormattedMessage {
-  // Extract message text and reply metadata
   let messageText = '';
   let replyTo: FormattedMessage['replyTo'] | undefined;
   let senderMetadata: SenderMetadata | undefined;
+  let mentions: MentionData[] | undefined;
 
-  if (typeof xmtpMsg.content === 'string') {
-    // Legacy plain text message - use cache for sender info
-    messageText = xmtpMsg.content;
+  // Check if this is a ContentTypeReply message
+  const isReply = xmtpMsg.contentType?.typeId === 'reply';
+  
+  if (isReply && xmtpMsg.content?.content && xmtpMsg.content?.referenceId) {
+    // Native XMTP ContentTypeReply format
+    const replyContent = xmtpMsg.content;
+    
+    // Parse the reply content (could be plain text or JSON with metadata)
+    let parsedContent: any = replyContent.content;
+    if (typeof replyContent.content === 'string') {
+      try {
+        parsedContent = JSON.parse(replyContent.content);
+      } catch (e) {
+        // Plain text content
+        parsedContent = { text: replyContent.content };
+      }
+    }
+    
+    messageText = parsedContent.text || parsedContent;
+    senderMetadata = parsedContent.sender;
+    mentions = parsedContent.mentions;
+    
+    // Get reply metadata from the enriched reply
+    if (replyContent.inReplyTo) {
+      const originalMsg = replyContent.inReplyTo;
+      let originalContent: any = originalMsg.content;
+      
+      // Parse original message content
+      if (typeof originalMsg.content === 'string') {
+        try {
+          originalContent = JSON.parse(originalMsg.content);
+        } catch (e) {
+          originalContent = { text: originalMsg.content };
+        }
+      }
+      
+      const originalText = originalContent.text || originalContent;
+      const originalSender = originalContent.sender || getUserProfile(originalMsg.senderInboxId);
+      
+      replyTo = {
+        messageId: replyContent.referenceId,
+        message: typeof originalText === 'string' ? originalText.substring(0, 100) : '',
+        username: originalSender?.username || 'Unknown',
+        pfp_url: originalSender?.pfp_url || '',
+      };
+    }
+  } else if (typeof xmtpMsg.content === 'string') {
+    // Try to parse as JSON first (could be our enhanced format)
+    try {
+      const parsedContent = JSON.parse(xmtpMsg.content);
+      if (parsedContent.text) {
+        messageText = parsedContent.text;
+        senderMetadata = parsedContent.sender;
+        mentions = parsedContent.mentions;
+        
+        // Check for embedded replyTo (new format)
+        if (parsedContent.replyTo?.reference) {
+          replyTo = {
+            messageId: parsedContent.replyTo.reference,
+            message: parsedContent.replyTo.text?.substring(0, 100) || '[Referenced message]',
+            username: parsedContent.replyTo.username || 'Unknown',
+            pfp_url: parsedContent.replyTo.pfp_url || '',
+          };
+        }
+        
+        // Check for legacy reply metadata (for backward compatibility)
+        if (parsedContent.reply?.reference) {
+          const legacyReply = parsedContent.reply;
+          const replySender = legacyReply.sender || getUserProfile(legacyReply.senderInboxId || '');
+          replyTo = {
+            messageId: legacyReply.reference,
+            message: legacyReply.text || '',
+            username: replySender?.username || 'Unknown',
+            pfp_url: replySender?.pfp_url || '',
+          };
+        }
+      } else {
+        // Not structured content, treat as plain text
+        messageText = xmtpMsg.content;
+      }
+    } catch (e) {
+      // Not JSON, treat as plain text
+      messageText = xmtpMsg.content;
+    }
   } else if (xmtpMsg.content?.text) {
-    // Structured message with sender metadata
+    // Enhanced or legacy structured message
     messageText = xmtpMsg.content.text;
     senderMetadata = xmtpMsg.content.sender;
+    mentions = xmtpMsg.content.mentions;
     
-    // Check for reply metadata
-    if (xmtpMsg.content.reply?.reference) {
-      // Try to get sender info from embedded metadata first, then cache
-      const replySender = xmtpMsg.content.reply.sender || getUserProfile(xmtpMsg.content.reply.senderInboxId || '');
+    // Check for embedded replyTo (new format)
+    if (xmtpMsg.content.replyTo?.reference) {
       replyTo = {
-        messageId: xmtpMsg.content.reply.reference,
-        message: xmtpMsg.content.reply.text || '',
+        messageId: xmtpMsg.content.replyTo.reference,
+        message: xmtpMsg.content.replyTo.text?.substring(0, 100) || '[Referenced message]',
+        username: xmtpMsg.content.replyTo.username || 'Unknown',
+        pfp_url: xmtpMsg.content.replyTo.pfp_url || '',
+      };
+    }
+    
+    // Check for legacy reply metadata (for backward compatibility)
+    if ((xmtpMsg.content as LegacyMessageContent).reply?.reference) {
+      const legacyReply = (xmtpMsg.content as LegacyMessageContent).reply!;
+      const replySender = legacyReply.sender || getUserProfile(legacyReply.senderInboxId || '');
+      replyTo = {
+        messageId: legacyReply.reference,
+        message: legacyReply.text || '',
         username: replySender?.username || 'Unknown',
         pfp_url: replySender?.pfp_url || '',
       };
@@ -137,6 +240,7 @@ export function formatXMTPMessage(
     pfp_url,
     message: messageText,
     timestamp: xmtpMsg.sentAt.toISOString(),
+    mentions,
     replyTo,
   };
 }
@@ -156,46 +260,26 @@ export function formatXMTPMessages(
 }
 
 /**
- * Creates message content with sender metadata
+ * Creates message content with sender metadata and mentions
  * @param text - The message text
  * @param sender - Sender metadata (username, pfp_url, etc.)
+ * @param mentions - Optional mention data array
  */
 export function createMessageContent(
   text: string,
-  sender: SenderMetadata
+  sender: SenderMetadata,
+  mentions?: MentionData[]
 ): MessageContent {
-  return {
+  const content: MessageContent = {
     text,
     sender,
   };
-}
-
-/**
- * Creates reply content for XMTP with sender metadata
- * @param replyText - The reply message text
- * @param sender - Current user's metadata
- * @param originalMessage - The message being replied to
- */
-export function createReplyContent(
-  replyText: string,
-  sender: SenderMetadata,
-  originalMessage: FormattedMessage
-): MessageContent {
-  return {
-    text: replyText,
-    sender,
-    reply: {
-      reference: originalMessage.id,
-      text: originalMessage.message.substring(0, 100), // Include snippet for context
-      senderInboxId: originalMessage.userId,
-      sender: {
-        username: originalMessage.username,
-        pfp_url: originalMessage.pfp_url,
-        displayName: originalMessage.displayName,
-        fid: originalMessage.userId,
-      },
-    },
-  };
+  
+  if (mentions && mentions.length > 0) {
+    content.mentions = mentions;
+  }
+  
+  return content;
 }
 
 /**

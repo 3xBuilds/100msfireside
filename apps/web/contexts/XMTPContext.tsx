@@ -2,10 +2,11 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
-import { Client, type Conversation, encodeText } from '@xmtp/browser-sdk';
+import { Client, type Conversation } from '@xmtp/browser-sdk';
 import type { Signer } from '@xmtp/browser-sdk';
 import { IdentifierKind } from '@xmtp/browser-sdk';
-import { createMessageContent, createReplyContent, type SenderMetadata, type FormattedMessage } from '@/utils/xmtp/messageHelpers';
+import { createMessageContent, type SenderMetadata, type FormattedMessage, type MessageContent } from '@/utils/xmtp/messageHelpers';
+import type { MentionData } from '@/utils/mentions';
 
 interface XMTPMessage {
   id: string;
@@ -22,8 +23,8 @@ interface XMTPContextProps {
   error: Error | null;
   initializeClient: () => Promise<void>;
   joinGroup: (groupId: string) => Promise<boolean>;
-  sendMessage: (text: string, sender: SenderMetadata) => Promise<void>;
-  sendReply: (text: string, referenceMessage: FormattedMessage, sender: SenderMetadata) => Promise<void>;
+  sendMessage: (text: string, sender: SenderMetadata, mentions?: MentionData[]) => Promise<void>;
+  sendReply: (text: string, referenceMessage: FormattedMessage, sender: SenderMetadata, mentions?: MentionData[]) => Promise<void>;
   leaveGroup: () => void;
 }
 
@@ -186,21 +187,11 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
       // Load existing messages
       const groupMessages = await group.messages();
       const formattedMessages = groupMessages.map(msg => {
-        // Parse JSON-encoded content if it's a string
-        let parsedContent = msg.content;
-        if (typeof msg.content === 'string') {
-          try {
-            parsedContent = JSON.parse(msg.content);
-          } catch (e) {
-            // If parsing fails, it's a legacy plain text message
-            parsedContent = msg.content;
-          }
-        }
-        
         return {
           id: msg.id,
           senderInboxId: msg.senderInboxId,
-          content: parsedContent,
+          content: msg.content,
+          contentType: msg.contentType,
           sentAt: msg.sentAt,
         };
       });
@@ -220,21 +211,11 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
                 return prev;
               }
               
-              // Parse JSON-encoded content if it's a string
-              let parsedContent = message.content;
-              if (typeof message.content === 'string') {
-                try {
-                  parsedContent = JSON.parse(message.content);
-                } catch (e) {
-                  // If parsing fails, it's a legacy plain text message
-                  parsedContent = message.content;
-                }
-              }
-              
               return [...prev, {
                 id: message.id,
                 senderInboxId: message.senderInboxId,
-                content: parsedContent,
+                content: message.content,
+                contentType: message.contentType,
                 sentAt: message.sentAt,
               }];
             });
@@ -259,19 +240,18 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
     }
   }, [client]);
 
-  // Send a text message with sender metadata
-  const sendMessage = useCallback(async (text: string, sender: SenderMetadata) => {
+  // Send a text message with sender metadata and mentions
+  const sendMessage = useCallback(async (text: string, sender: SenderMetadata, mentions?: MentionData[]) => {
     if (!currentGroup) {
       throw new Error('No group joined');
     }
 
     try {
-      // Create structured content with sender metadata
-      const messageContent = createMessageContent(text, sender);
+      // Create structured content with sender metadata and mentions
+      const messageContent = createMessageContent(text, sender, mentions);
       
-      // Encode and send the structured content
-      const encodedContent = await encodeText(JSON.stringify(messageContent));
-      await currentGroup.send(encodedContent);
+      // Send as text with embedded JSON metadata
+      await currentGroup.sendText(JSON.stringify(messageContent));
       
       console.log('✅ Message sent with sender metadata:', sender.username);
     } catch (err) {
@@ -280,19 +260,30 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
     }
   }, [currentGroup]);
 
-  // Send a reply to a message with sender metadata
-  const sendReply = useCallback(async (text: string, referenceMessage: FormattedMessage, sender: SenderMetadata) => {
+  // Send a reply to a message with sender metadata and mentions
+  const sendReply = useCallback(async (text: string, referenceMessage: FormattedMessage, sender: SenderMetadata, mentions?: MentionData[]) => {
     if (!currentGroup) {
       throw new Error('No group joined');
     }
 
     try {
-      // Create reply content with sender metadata
-      const replyContent = createReplyContent(text, sender, referenceMessage);
+      // Create message content with sender metadata and mentions
+      const messageContent = createMessageContent(text, sender, mentions);
       
-      // Encode and send the reply content
-      const encodedContent = await encodeText(JSON.stringify(replyContent));
-      await currentGroup.send(encodedContent);
+      // Encode as JSON text and send as text message with reply metadata
+      const contentString = JSON.stringify({
+        ...messageContent,
+        replyTo: {
+          reference: referenceMessage.id,
+          senderInboxId: referenceMessage.userId,
+          text: referenceMessage.message,
+          username: referenceMessage.username,
+          displayName: referenceMessage.displayName,
+          pfp_url: referenceMessage.pfp_url,
+        },
+      });
+      
+      await currentGroup.sendText(contentString);
       
       console.log('✅ Reply sent with sender metadata:', sender.username);
     } catch (err) {

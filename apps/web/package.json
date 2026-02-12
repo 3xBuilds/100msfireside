@@ -21,6 +21,8 @@
     "@types/ioredis": "^4.28.10",
     "@vercel/og": "^0.8.6",
     "@xmtp/browser-sdk": "^6.3.0",
+    "@xmtp/content-type-reply": "^2.0.3",
+    "@xmtp/content-type-text": "^2.0.2",
     "agora-rtc-react": "^2.5.0",
     "agora-rtc-sdk-ng": "^4.24.0",
     "boring-avatars": "^1.5.8",

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { ChatMessage } from "./ChatMessage";
 import { ReplyPreview } from "./ReplyPreview";
+import { MentionAutocomplete } from "./MentionAutocomplete";
 import { useGlobalContext } from "@/utils/providers/globalContext";
 import { toast } from "react-toastify";
 import sdk from "@farcaster/miniapp-sdk";
@@ -20,6 +21,7 @@ import {
   registerUserProfile, 
   type FormattedMessage 
 } from "@/utils/xmtp/messageHelpers";
+import { extractMentions, findMentionAtCursor, insertMention, type MentionableUser } from "@/utils/mentions";
 
 interface ChatProps {
   isOpen: boolean;
@@ -32,6 +34,15 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
   const [loading, setLoading] = useState(false);
   const [joiningGroup, setJoiningGroup] = useState(false);
   const [selectedReplyMessage, setSelectedReplyMessage] = useState<FormattedMessage | null>(null);
+  
+  // Mention autocomplete state
+  const [showMentionAutocomplete, setShowMentionAutocomplete] = useState(false);
+  const [mentionableUsers, setMentionableUsers] = useState<MentionableUser[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<MentionableUser[]>([]);
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
+  const [mentionPosition, setMentionPosition] = useState({ top: 0, left: 0 });
+  const [currentMentionSearch, setCurrentMentionSearch] = useState<{ start: number; query: string } | null>(null);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -202,6 +213,90 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
 
 
 
+  // Handle mention autocomplete
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    const cursorPosition = e.target.selectionStart || 0;
+    
+    setMessage(newValue);
+
+    // Check for mention at cursor
+    const mentionMatch = findMentionAtCursor(newValue, cursorPosition);
+    
+    if (mentionMatch) {
+      const { start, username } = mentionMatch;
+      setCurrentMentionSearch({ start, query: username });
+      
+      // Filter users based on query
+      const filtered = mentionableUsers.filter(user => 
+        user.username.toLowerCase().includes(username.toLowerCase()) ||
+        user.displayName?.toLowerCase().includes(username.toLowerCase())
+      ).slice(0, 6); // Limit to 6 results
+      
+      setFilteredUsers(filtered);
+      setSelectedMentionIndex(0);
+      setShowMentionAutocomplete(filtered.length > 0);
+      
+      // Calculate position for autocomplete dropdown
+      if (textareaRef.current && filtered.length > 0) {
+        const textarea = textareaRef.current;
+        const rect = textarea.getBoundingClientRect();
+        
+        // Simple position calculation - show above textarea
+        setMentionPosition({
+          top: rect.top - 200, // Position above textarea
+          left: rect.left + 16,
+        });
+      }
+    } else {
+      setShowMentionAutocomplete(false);
+      setCurrentMentionSearch(null);
+      setFilteredUsers([]);
+    }
+  };
+
+  // Handle mention selection from autocomplete
+  const handleMentionSelect = (user: MentionableUser) => {
+    if (!currentMentionSearch || !textareaRef.current) return;
+
+    const { start } = currentMentionSearch;
+    const result = insertMention(message, start + 1, user.username);
+    
+    setMessage(result.newText);
+    setShowMentionAutocomplete(false);
+    setCurrentMentionSearch(null);
+    setFilteredUsers([]);
+    
+    // Set cursor position after mention
+    setTimeout(() => {
+      textareaRef.current?.setSelectionRange(result.newCursorPosition, result.newCursorPosition);
+      textareaRef.current?.focus();
+    }, 0);
+  };
+
+  // Handle autocomplete navigation
+  const handleMentionKeyDown = (e: React.KeyboardEvent) => {
+    if (!showMentionAutocomplete || filteredUsers.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedMentionIndex(prev => 
+        prev < filteredUsers.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedMentionIndex(prev => prev > 0 ? prev - 1 : 0);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      handleMentionSelect(filteredUsers[selectedMentionIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowMentionAutocomplete(false);
+      setCurrentMentionSearch(null);
+      setFilteredUsers([]);
+    }
+  };
+
   // Auto-resize textarea based on content
   const adjustTextareaHeight = () => {
     const textarea = textareaRef.current;
@@ -234,6 +329,8 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
     setMessage(""); // Clear input immediately
     const replyMessage = selectedReplyMessage;
     setSelectedReplyMessage(null); // Clear reply selection
+    setShowMentionAutocomplete(false); // Close mention autocomplete
+    setCurrentMentionSearch(null);
     
     // Reset textarea height after clearing message
     setTimeout(() => {
@@ -250,11 +347,14 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
         fid: user.fid?.toString() || '',
       };
 
-      // Send via XMTP with sender metadata
+      // Extract mentions from message text
+      const mentions = extractMentions(messageText, mentionableUsers);
+
+      // Send via XMTP with sender metadata and mentions
       if (replyMessage) {
-        await sendReply(messageText, replyMessage, senderMetadata);
+        await sendReply(messageText, replyMessage, senderMetadata, mentions);
       } else {
-        await sendXMTPMessage(messageText, senderMetadata);
+        await sendXMTPMessage(messageText, senderMetadata, mentions);
       }
 
       setTimeout(scrollToBottom, 100);
@@ -265,6 +365,15 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
+    // Handle mention autocomplete navigation first
+    if (showMentionAutocomplete) {
+      handleMentionKeyDown(e);
+      // Don't send message if autocomplete is open and Enter is pressed
+      if (e.key === 'Enter') {
+        return;
+      }
+    }
+    
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -302,7 +411,34 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
   };
 
   // Format XMTP messages for display
-  const formattedMessages = formatXMTPMessages(xmtpMessages, client?.inboxId);
+  const formattedMessages = useMemo(() => 
+    formatXMTPMessages(xmtpMessages, client?.inboxId),
+    [xmtpMessages, client?.inboxId]
+  );
+
+  // Build mentionable users list from messages
+  useEffect(() => {
+    if (!formattedMessages || formattedMessages.length === 0) {
+      setMentionableUsers([]);
+      return;
+    }
+
+    // Extract unique users from messages
+    const usersMap = new Map<string, MentionableUser>();
+    
+    formattedMessages.forEach(msg => {
+      if (!usersMap.has(msg.userId)) {
+        usersMap.set(msg.userId, {
+          inboxId: msg.userId,
+          username: msg.username || 'Anonymous',
+          displayName: msg.displayName || msg.username || undefined,
+          pfp_url: msg.pfp_url,
+        });
+      }
+    });
+
+    setMentionableUsers(Array.from(usersMap.values()));
+  }, [xmtpMessages, client?.inboxId]);
 
   return (
     <Drawer open={isOpen} onOpenChange={setIsChatOpen}>
@@ -380,19 +516,33 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
         <DrawerFooter className="border-t border-fireside-lightWhite">
           {selectedReplyMessage && (
             <ReplyPreview
-              replyTo={selectedReplyMessage.replyTo!}
+              replyTo={{
+                messageId: selectedReplyMessage.id,
+                message: selectedReplyMessage.message,
+                username: selectedReplyMessage.username,
+                pfp_url: selectedReplyMessage.pfp_url,
+              }}
               variant="input-banner"
               onClear={handleClearReply}
               onClick={() => handleScrollToMessage(selectedReplyMessage.id)}
+            />
+          )}
+          {showMentionAutocomplete && (
+            <MentionAutocomplete
+              users={filteredUsers}
+              selectedIndex={selectedMentionIndex}
+              position={mentionPosition}
+              onSelect={handleMentionSelect}
+              onKeyDown={handleMentionKeyDown}
             />
           )}
           <div className="flex items-start space-x-3">
             <textarea
               ref={textareaRef}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={currentGroup ? "Type a message..." : "Connecting to chat..."}
+              onChange={handleMessageChange}
+              onKeyDown={handleKeyPress}
+              placeholder={currentGroup ? "Type a message... Use @ to mention" : "Connecting to chat..."}
               disabled={!currentGroup}
               className="w-full px-4 py-3 bg-white/5 text-white rounded-lg border border-fireside-lightWhite focus:border-fireside-darkWhite focus:ring-2 focus:ring-fireside-orange transition-colors duration-200 outline-none resize-none min-h-[48px] text-base disabled:opacity-50 disabled:cursor-not-allowed"
               maxLength={500}
