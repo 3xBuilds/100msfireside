@@ -7,9 +7,8 @@ import { ethers } from 'ethers';
  */
 
 
-// Cache for created group conversations by group ID
-// This avoids issues with syncing newly created groups
-const groupCache = new Map<string, any>();
+// Note: We intentionally DO NOT cache groups locally
+// to ensure fresh network state on every operation
 
 /**
  * Gets the system wallet credentials from environment variables
@@ -78,23 +77,29 @@ export async function createXMTPClient(
 
   const options = {
       env:"production" as "production" | "local" | "dev",
-      appVersion: '1.0.0',
+      appVersion: 'fireside/1.0.0',
       dbEncryptionKey,
+      disableDeviceSync:false
     }
   try {
     let client = await Client.build(identifier, options)
 
     if(!client){
       console.log(`Client.build did not return a client instance, trying Client.create...`);
-    client = await Client.create(signer, {
-      env:'production',
-      appVersion: '1.0.0',
-      dbEncryptionKey,
-    });
+      client = await Client.create(signer, options);
 
-    console.log(`✅ XMTP client created for ${wallet.address}`);
+      console.log(`✅ XMTP client created for ${wallet.address}`);
     }
     
+    // CRITICAL: Sync from network immediately after client creation
+    // This ensures we have the latest conversations from the network,
+    // not just what's in the local database
+    console.log(`Syncing client from network to get latest state...`);
+    await client.conversations.syncAll();
+    await client.conversations.sync();
+    
+    const conversationCount = (await client.conversations.list()).length;
+    console.log(`✅ Client synced - ${conversationCount} conversations available`);
     
     return client;
   } catch (error) {
@@ -138,18 +143,27 @@ export async function createXMTPGroup(
     const group = await client.conversations.createGroup([hostInboxId]);
     
     console.log(`Sending welcome message to publish group to network...`);
-    await group.sendText('Welcome to the room! 🎉');
+    await group.send('Welcome to the room! 🎉');
     
-    console.log(`Syncing to ensure group is committed to network...`);
+    console.log(`Syncing group state to network...`);
     await group.sync();
+    
+    console.log(`Publishing pending messages...`);
+    await group.publishMessages();
+    
+    console.log(`Syncing client conversations to network...`);
     await client.conversations.sync();
     
-    // Wait for network propagation - give the XMTP network time to propagate the group
-    // so other clients can discover it immediately
-    console.log(`Waiting for network propagation...`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Final sync to ensure everything is committed
+    console.log(`Final sync to commit to network...`);
+    await group.sync();
     
-    // Verify group is queryable
+    // Extended wait for network propagation across XMTP nodes
+    console.log(`Waiting for network propagation across nodes...`);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Verify group is queryable by doing a fresh sync from network
+    console.log(`Verifying group is discoverable on network...`);
     await client.conversations.syncAll();
     const conversations = await client.conversations.list();
     const verifyGroup = conversations.find(conv => conv.id === group.id);
@@ -159,8 +173,6 @@ export async function createXMTPGroup(
     } else {
       console.log(`✅ Group ${group.id} verified in conversation list`);
     }
-    
-    groupCache.set(group.id, group);
     
     console.log(`✅ XMTP group created and published: ${group.id} for room ${roomId}`);
     
@@ -183,28 +195,23 @@ export async function addMemberToGroup(
   memberInboxId: string
 ): Promise<void> {
   try {
-    let group = groupCache.get(groupId);
-    
-    // If not in cache, try to find it by syncing
-    if (!group) {
-      console.log(`Group ${groupId} not in cache, syncing conversations...`);
+      // Aggressive sync to pull latest groups from network
+      console.log(`Syncing conversations from network...`);
       await client.conversations.syncAll();
+      
+      // Additional sync cycle to ensure we have latest network state
+      await client.conversations.sync();
       
       // Find the group
       const conversations = await client.conversations.list();
       console.log(`Searching for group ${groupId} among ${conversations.length} conversations...`);
-      group = conversations.find(conv => conv.id === groupId);
+      const group = conversations.find(conv => conv.id === groupId);
 
       if (!group) {
         console.error(`Group ${groupId} not found. Available conversations:`, conversations.map(c => c.id));
         throw new Error(`Group ${groupId} not found`);
       }
-      
-      // Cache it for future use
-      groupCache.set(groupId, group);
-    } else {
-      console.log(`Using cached group ${groupId}`);
-    }
+    
 
     // Check if member is already in group
     await group.sync();
@@ -216,11 +223,17 @@ export async function addMemberToGroup(
       return;
     }
 
-    // Add the member (this also syncs optimistic groups to network)
+    // Add the member and sync to network
     // Only groups (not DMs) support addMembers
     if ('addMembers' in group && typeof group.addMembers === 'function') {
       await group.addMembers([memberInboxId]);
-      console.log(`Added member ${memberInboxId} to group ${groupId}`);
+      
+      // Ensure changes are published to network
+      await group.sync();
+      await group.publishMessages();
+      await client.conversations.sync();
+      
+      console.log(`✅ Added member ${memberInboxId} to group ${groupId} and synced to network`);
     } else {
       throw new Error('Cannot add members to this conversation type');
     }
@@ -243,21 +256,15 @@ export async function addMembersWithAddresses(
   addresses: string[]
 ): Promise<void> {
   try {
-    let group = groupCache.get(groupId);
+    // Always sync from network to get latest state
+    await client.conversations.syncAll();
+    await client.conversations.sync();
     
-    // If not in cache, sync and find the group
-    if (!group) {
-      await client.conversations.syncAll();
-      
-      const conversations = await client.conversations.list();
-      group = conversations.find(conv => conv.id === groupId);
+    const conversations = await client.conversations.list();
+    const group = conversations.find(conv => conv.id === groupId);
 
-      if (!group) {
-        throw new Error(`Group ${groupId} not found`);
-      }
-      
-      // Cache it for future use
-      groupCache.set(groupId, group);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
     }
 
     // Convert addresses to inbox IDs
@@ -289,11 +296,17 @@ export async function addMembersWithAddresses(
       return;
     }
 
-    // Add new members (this also syncs optimistic groups to network)
+    // Add new members and sync to network
     // Only groups (not DMs) support addMembers
     if ('addMembers' in group && typeof group.addMembers === 'function') {
       await group.addMembers(newInboxIds);
-      console.log(`Added ${newInboxIds.length} members to group ${groupId}`);
+      
+      // Ensure changes are published to network
+      await group.sync();
+      await group.publishMessages();
+      await client.conversations.sync();
+      
+      console.log(`✅ Added ${newInboxIds.length} members to group ${groupId} and synced to network`);
     } else {
       throw new Error('Cannot add members to this conversation type');
     }
@@ -376,21 +389,15 @@ export async function getGroupById(
   groupId: string
 ): Promise<any> {
   try {
-    let group = groupCache.get(groupId);
+    // Always sync from network to get latest state
+    await client.conversations.syncAll();
+    await client.conversations.sync();
     
-    // If not in cache, sync and find the group
-    if (!group) {
-      await client.conversations.syncAll();
-      
-      const conversations = await client.conversations.list();
-      group = conversations.find(conv => conv.id === groupId);
+    const conversations = await client.conversations.list();
+    const group = conversations.find(conv => conv.id === groupId);
 
-      if (!group) {
-        throw new Error(`Group ${groupId} not found`);
-      }
-      
-      // Cache it for future use
-      groupCache.set(groupId, group);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
     }
 
     await group.sync();
