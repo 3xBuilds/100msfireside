@@ -145,14 +145,31 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
     try {
       console.log(`🔄 Searching for group ${groupId}...`);
       
-      // Sync conversations first (including unknown consent state)
-      console.log('🔄 Syncing all conversations...');
-      await client.conversations.syncAll();
+      // Retry logic with exponential backoff for finding newly created groups
+      const maxRetries = 5;
+      let group = null;
       
-      // Find the group in the user's conversations
-      const conversations = await client.conversations.list();
-      console.log(`📋 Found ${conversations.length} conversations total`);
-      const group = conversations.find(conv => conv.id === groupId);
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        if (attempt > 0) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.log(`Retry attempt ${attempt}/${maxRetries - 1} - waiting ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        
+        console.log(`🔄 Syncing all conversations (attempt ${attempt + 1})...`);
+        await client.conversations.syncAll();
+        
+        const conversations = await client.conversations.list();
+        console.log(`📋 Found ${conversations.length} conversations total`);
+        group = conversations.find(conv => conv.id === groupId);
+        
+        if (group) {
+          console.log(`✅ Found group ${groupId} on attempt ${attempt + 1}`);
+          break;
+        }
+        
+        console.log(`⚠️ Group ${groupId} not found on attempt ${attempt + 1}`);
+      }
 
       if (!group) {
         console.error(`❌ Group ${groupId} not found in user's conversations`);

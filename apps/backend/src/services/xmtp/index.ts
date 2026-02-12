@@ -61,16 +61,9 @@ export async function createXMTPClient(
   privateKey?: string
 ): Promise<Client> {
   // Use system wallet if no credentials provided
-  const wallet = walletAddress && privateKey 
-    ? { address: walletAddress, privateKey }
-    : getSystemWallet();
+  const wallet = getSystemWallet();
 
   const cacheKey = wallet.address.toLowerCase();
-  
-  // Return cached client if exists
-  if (clientCache.has(cacheKey)) {
-    return clientCache.get(cacheKey)!;
-  }
 
   const signer = createSigner(wallet.address, wallet.privateKey);
   
@@ -133,11 +126,28 @@ export async function createXMTPGroup(
     console.log(`Creating group with host ${hostWalletAddress} (inbox: ${hostInboxId})...`);
     const group = await client.conversations.createGroup([hostInboxId]);
     
-    console.log(`Sending welcome message to ensure group is published...`);
+    console.log(`Sending welcome message to publish group to network...`);
     await group.sendText('Welcome to the room! 🎉');
     
-    await client.conversations.sync();
+    console.log(`Syncing to ensure group is committed to network...`);
     await group.sync();
+    await client.conversations.sync();
+    
+    // Wait for network propagation - give the XMTP network time to propagate the group
+    // so other clients can discover it immediately
+    console.log(`Waiting for network propagation...`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Verify group is queryable
+    await client.conversations.syncAll();
+    const conversations = await client.conversations.list();
+    const verifyGroup = conversations.find(conv => conv.id === group.id);
+    
+    if (!verifyGroup) {
+      console.warn(`⚠️ Group ${group.id} not found in conversation list after creation - may still be propagating`);
+    } else {
+      console.log(`✅ Group ${group.id} verified in conversation list`);
+    }
     
     groupCache.set(group.id, group);
     
