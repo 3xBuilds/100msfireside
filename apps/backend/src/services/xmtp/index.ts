@@ -9,6 +9,10 @@ import { ethers } from 'ethers';
 // Cache for XMTP clients to avoid recreating them
 const clientCache = new Map<string, Client>();
 
+// Cache for created group conversations by group ID
+// This avoids issues with syncing newly created groups
+const groupCache = new Map<string, any>();
+
 /**
  * Gets the system wallet credentials from environment variables
  * This wallet is used to create and manage all XMTP groups
@@ -119,11 +123,14 @@ export async function createXMTPGroup(
     const inboxid = await getInboxIdFromAddress(client, "0x1ce256752fBa067675F09291d12A1f069f34f5e8"); // Force local ID generation
 
     if(inboxid){
-await group.addMembers([inboxid]); // Add a dummy member to trigger network sync and ID generation
+      await group.addMembers([inboxid]); // Add a dummy member to trigger network sync and ID generation
     }
     
     // Sync the group to ensure it's properly initialized
     await group.sync();
+    
+    // Cache the group conversation for immediate access
+    groupCache.set(group.id, group);
     
     console.log(`✅ XMTP optimistic group created and synced: ${group.id} for room ${roomId}`);
     
@@ -146,18 +153,27 @@ export async function addMemberToGroup(
   memberInboxId: string
 ): Promise<void> {
   try {
-    // Sync conversations first to ensure we have the latest list
-    console.log(`🔄 Syncing conversations for group ${groupId}...`);
-    await client.conversations.syncAll();
+    let group = groupCache.get(groupId);
     
-    // Find the group
-    const conversations = await client.conversations.list();
-    console.log(`🔍 Searching for group ${groupId} among ${conversations.length} conversations...`);
-    const group = conversations.find(conv => conv.id === groupId);
-
+    // If not in cache, try to find it by syncing
     if (!group) {
-      console.error(`❌ Group ${groupId} not found. Available conversations:`, conversations.map(c => c.id));
-      throw new Error(`Group ${groupId} not found`);
+      console.log(`Group ${groupId} not in cache, syncing conversations...`);
+      await client.conversations.syncAll();
+      
+      // Find the group
+      const conversations = await client.conversations.list();
+      console.log(`Searching for group ${groupId} among ${conversations.length} conversations...`);
+      group = conversations.find(conv => conv.id === groupId);
+
+      if (!group) {
+        console.error(`Group ${groupId} not found. Available conversations:`, conversations.map(c => c.id));
+        throw new Error(`Group ${groupId} not found`);
+      }
+      
+      // Cache it for future use
+      groupCache.set(groupId, group);
+    } else {
+      console.log(`Using cached group ${groupId}`);
     }
 
     // Check if member is already in group
@@ -166,7 +182,7 @@ export async function addMemberToGroup(
     const isMember = members.some(m => m.inboxId === memberInboxId);
 
     if (isMember) {
-      console.log(`ℹ️ Member ${memberInboxId} already in group ${groupId}`);
+      console.log(`Member ${memberInboxId} already in group ${groupId}`);
       return;
     }
 
@@ -174,12 +190,12 @@ export async function addMemberToGroup(
     // Only groups (not DMs) support addMembers
     if ('addMembers' in group && typeof group.addMembers === 'function') {
       await group.addMembers([memberInboxId]);
-      console.log(`✅ Added member ${memberInboxId} to group ${groupId}`);
+      console.log(`Added member ${memberInboxId} to group ${groupId}`);
     } else {
       throw new Error('Cannot add members to this conversation type');
     }
   } catch (error) {
-    console.error(`❌ Failed to add member to group ${groupId}:`, error);
+    console.error(`Failed to add member to group ${groupId}:`, error);
     throw error;
   }
 }
@@ -197,15 +213,21 @@ export async function addMembersWithAddresses(
   addresses: string[]
 ): Promise<void> {
   try {
-    // Sync conversations first to ensure we have the latest list
-    await client.conversations.syncAll();
+    let group = groupCache.get(groupId);
     
-    // Find the group
-    const conversations = await client.conversations.list();
-    const group = conversations.find(conv => conv.id === groupId);
-
+    // If not in cache, sync and find the group
     if (!group) {
-      throw new Error(`Group ${groupId} not found`);
+      await client.conversations.syncAll();
+      
+      const conversations = await client.conversations.list();
+      group = conversations.find(conv => conv.id === groupId);
+
+      if (!group) {
+        throw new Error(`Group ${groupId} not found`);
+      }
+      
+      // Cache it for future use
+      groupCache.set(groupId, group);
     }
 
     // Convert addresses to inbox IDs
@@ -215,12 +237,12 @@ export async function addMembersWithAddresses(
       if (inboxId) {
         inboxIds.push(inboxId);
       } else {
-        console.warn(`⚠️ Skipping address ${address} - not registered on XMTP`);
+        console.warn(`Skipping address ${address} - not registered on XMTP`);
       }
     }
 
     if (inboxIds.length === 0) {
-      console.log('ℹ️ No valid inbox IDs to add');
+      console.log('No valid inbox IDs to add');
       return;
     }
 
@@ -233,7 +255,7 @@ export async function addMembersWithAddresses(
     const newInboxIds = inboxIds.filter(id => !existingInboxIds.has(id));
 
     if (newInboxIds.length === 0) {
-      console.log(`ℹ️ All members already in group ${groupId}`);
+      console.log(`All members already in group ${groupId}`);
       return;
     }
 
@@ -241,12 +263,12 @@ export async function addMembersWithAddresses(
     // Only groups (not DMs) support addMembers
     if ('addMembers' in group && typeof group.addMembers === 'function') {
       await group.addMembers(newInboxIds);
-      console.log(`✅ Added ${newInboxIds.length} members to group ${groupId}`);
+      console.log(`Added ${newInboxIds.length} members to group ${groupId}`);
     } else {
       throw new Error('Cannot add members to this conversation type');
     }
   } catch (error) {
-    console.error(`❌ Failed to add members to group ${groupId}:`, error);
+    console.error(`Failed to add members to group ${groupId}:`, error);
     throw error;
   }
 }
@@ -292,15 +314,8 @@ export async function getInboxIdFromAddress(
   address: string
 ): Promise<string | null> {
   try {
-    // First check if the address can receive XMTP messages
-    const canMsg = await canMessage(client, [address]);
-    
-    if (!canMsg.get(address.toLowerCase())) {
-      console.log(`⚠️ Address ${address} cannot receive XMTP messages`);
-      return null;
-    }
-
-    // Get the inbox ID using the address as an identifier
+    // Directly fetch the inbox ID using the address as an identifier
+    // This is more reliable than canMessage() for newly registered wallets
     const identifier = {
       identifier: address.toLowerCase(),
       identifierKind: IdentifierKind.Ethereum,
@@ -309,12 +324,14 @@ export async function getInboxIdFromAddress(
     const inboxId = await client.fetchInboxIdByIdentifier(identifier);
     
     if (inboxId) {
+      console.log(`Found inbox ID ${inboxId} for address ${address}`);
       return inboxId;
     }
 
+    console.log(`No inbox ID found for address ${address} - wallet not registered on XMTP`);
     return null;
   } catch (error) {
-    console.error(`❌ Failed to get inbox ID for ${address}:`, error);
+    console.error(`Failed to get inbox ID for ${address}:`, error);
     return null;
   }
 }
@@ -329,28 +346,36 @@ export async function getGroupById(
   groupId: string
 ): Promise<any> {
   try {
-    // Sync conversations first to ensure we have the latest list
-    await client.conversations.syncAll();
+    let group = groupCache.get(groupId);
     
-    const conversations = await client.conversations.list();
-    const group = conversations.find(conv => conv.id === groupId);
-
+    // If not in cache, sync and find the group
     if (!group) {
-      throw new Error(`Group ${groupId} not found`);
+      await client.conversations.syncAll();
+      
+      const conversations = await client.conversations.list();
+      group = conversations.find(conv => conv.id === groupId);
+
+      if (!group) {
+        throw new Error(`Group ${groupId} not found`);
+      }
+      
+      // Cache it for future use
+      groupCache.set(groupId, group);
     }
 
     await group.sync();
     return group;
   } catch (error) {
-    console.error(`❌ Failed to get group ${groupId}:`, error);
+    console.error(`Failed to get group ${groupId}:`, error);
     throw error;
   }
 }
 
 /**
- * Clears the client cache (useful for testing or cleanup)
+ * Clears the client and group caches (useful for testing or cleanup)
  */
 export function clearClientCache(): void {
   clientCache.clear();
-  console.log('🧹 XMTP client cache cleared');
+  groupCache.clear();
+  console.log('XMTP client and group caches cleared');
 }

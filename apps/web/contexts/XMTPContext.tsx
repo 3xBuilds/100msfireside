@@ -46,17 +46,15 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (isLoading) {
-      console.log('⏭️ Skipping initialization - already initializing');
+    // If client already exists for this address, don't reinitialize
+    if (client) {
+      console.log('✅ XMTP client already initialized for address:', address);
       return;
     }
 
-    // Clear existing client if any
-    if (client) {
-      console.log('🔄 Clearing existing client for re-initialization');
-      setClient(null);
-      setCurrentGroup(null);
-      setMessages([]);
+    if (isLoading) {
+      console.log('⏭️ Skipping initialization - already initializing');
+      return;
     }
 
     setIsLoading(true);
@@ -102,7 +100,7 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
       });
 
       setClient(xmtpClient);
-      console.log('✅ XMTP client initialized succesInbox ID:', xmtpClient.inboxId);
+      console.log('✅ XMTP client initialized successfully! Inbox ID:', xmtpClient.inboxId);
     } catch (err: any) {
       console.error('❌ Failed to initialize XMTP client:', err);
       setError(err instanceof Error ? err : new Error('Failed to initialize XMTP client'));
@@ -110,7 +108,7 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [address, walletClient, isConnected, isLoading, client]);
+  }, [address, walletClient, isConnected, client, isLoading]);
 
   // Auto-initialize when wallet connects
   useEffect(() => {

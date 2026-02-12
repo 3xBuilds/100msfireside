@@ -337,30 +337,25 @@ Retrieves the XMTP group conversation ID for a room.
 
           const xmtpClient = await getSystemClient();
 
-          // Check if user can receive XMTP messages
-          const canReceive = await canMessage(xmtpClient, [wallet]);
-
-          console.log('Checking if user wallet can receive XMTP messages:', wallet, canReceive.get(wallet.toLowerCase()));
-          
-          if (!canReceive.get(wallet.toLowerCase())) {
-            set.status = 400;
-            return errorResponse('Wallet not registered on XMTP network. Please ensure XMTP client is initialized first.');
-          }
-
-          // Get user's inbox ID from their wallet address
+          // Try to get user's inbox ID directly
+          // This is more reliable than canMessage() for newly registered wallets
+          console.log('🔍 Fetching inbox ID for wallet:', wallet);
           const userInboxId = await getInboxIdFromAddress(xmtpClient, wallet);
           
           if (!userInboxId) {
             set.status = 400;
-            return errorResponse('Unable to retrieve inbox ID. Wallet may not be registered on XMTP network.');
+            return errorResponse('Wallet not registered on XMTP network. Please initialize your XMTP client first by signing the message in your wallet.');
           }
+
+          console.log('✅ Found inbox ID:', userInboxId, 'for wallet:', wallet);
 
           // Add member to group
           await addMemberToGroup(xmtpClient, room.xmtpGroupId, userInboxId);
 
           return successResponse({
             message: 'Successfully added to XMTP group',
-            groupId: room.xmtpGroupId
+            groupId: room.xmtpGroupId,
+            inboxId: userInboxId
           });
         } catch (error: any) {
           console.error('Error adding member to XMTP group:', error);

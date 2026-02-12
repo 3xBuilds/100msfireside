@@ -82,7 +82,24 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
       console.log('🔍 Chat setup - isOpen:', isOpen, 'roomId:', roomId, 'client:', !!client, 'currentGroup:', !!currentGroup, 'joiningGroup:', joiningGroup, 'xmtpLoading:', xmtpLoading);
       
       // Skip if already in a group or already joining
-      if (!isOpen || !roomId || !client || joiningGroup || currentGroup) return;
+      if (!isOpen || !roomId || joiningGroup || currentGroup) return;
+
+      // If no client, initialize first
+      if (!client) {
+        console.log('🔄 No XMTP client, initializing...');
+        setJoiningGroup(true);
+        setLoading(true);
+        try {
+          await initializeClient();
+        } catch (error) {
+          console.error('❌ Failed to initialize XMTP client:', error);
+          toast.error('Failed to initialize chat. Please try again.');
+        } finally {
+          setLoading(false);
+          setJoiningGroup(false);
+        }
+        return;
+      }
 
       setJoiningGroup(true);
       setLoading(true);
@@ -120,17 +137,27 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
           const addMemberResponse = await addMemberToXMTPGroup(roomId, address || '', token);
 
           if (addMemberResponse.ok && addMemberResponse.data?.success) {
-            toast.info('You have been added to the chat. Refreshing...');
+            toast.success('You have been added to the chat!');
             
             // Wait a moment for the group to update, then try joining again
             setTimeout(async () => {
-              await joinGroup(xmtpGroupId);
+              const retryJoined = await joinGroup(xmtpGroupId);
+              if (!retryJoined) {
+                toast.error('Failed to join chat. Please close and reopen the chat.');
+              }
             }, 2000);
           } else {
             const errorMsg = addMemberResponse.data?.error || addMemberResponse.data?.message || 'Failed to join chat';
-            if (errorMsg.includes('not registered') || errorMsg.includes('XMTP network') || errorMsg.includes('Wallet not registered')) {
-              toast.error('Initializing XMTP. Please sign the message...');
+            
+            // Check for XMTP registration errors
+            if (errorMsg.includes('not registered') || errorMsg.includes('XMTP network') || errorMsg.includes('initialize your XMTP client')) {
+              toast.error('Please sign the message to enable chat...');
+              // Re-initialize client to trigger signature
               await initializeClient();
+              // After initialization, retry the add member call
+              setTimeout(() => {
+                setupXMTPChat();
+              }, 3000);
             } else {
               toast.error(errorMsg);
             }
@@ -140,8 +167,9 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
         }
       } catch (error: any) {
         console.error('❌ Failed to setup XMTP chat:', error);
-        if (error?.message?.includes('not registered') || error?.message?.includes('XMTP network') || error?.message?.includes('Wallet not registered')) {
-          toast.error('Initializing XMTP. Please sign the message...');
+        
+        if (error?.message?.includes('not registered') || error?.message?.includes('XMTP network')) {
+          toast.error('Initializing chat. Please sign the message...');
           await initializeClient();
         } else {
           toast.error('Unable to connect to chat');
@@ -153,7 +181,7 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
     }
 
     setupXMTPChat();
-  }, [isOpen, roomId, client, currentGroup, joiningGroup, joinGroup]);
+  }, [isOpen, roomId, client, currentGroup, joiningGroup, joinGroup, initializeClient, address]);
 
   // Leave group when chat closes
   useEffect(() => {
