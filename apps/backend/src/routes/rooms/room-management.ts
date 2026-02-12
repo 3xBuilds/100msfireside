@@ -1286,6 +1286,9 @@ Starts recording for an ongoing room and updates the recordingEnabled flag.
           params: t.Object({
             roomId: t.String({ description: 'MongoDB ObjectId of the room to start' })
           }),
+          body: t.Object({
+            wallet: t.Optional(t.String({ description: 'Host wallet address for XMTP group creation' }))
+          }),
           response: {
             200: StartRoomResponseSchema,
             400: ErrorResponse,

@@ -17,6 +17,7 @@ import {
 } from "@/components/UI/drawer";
 import Button from './UI/Button';
 import DateTimePicker from './UI/DateTimePicker';
+import { useAccount } from 'wagmi';
 
 interface CreateRoomModalProps {
   isOpen: boolean;
@@ -50,6 +51,8 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
   const [recordingEnabled, setRecordingEnabled] = useState(true);
   const navigate = useNavigateWithLoader();
   const { user } = useGlobalContext();
+
+  const {address} = useAccount()
 
   useEffect(() => {
     if (isOpen) {
@@ -108,8 +111,10 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
         recurrenceType: (showSchedule && isRecurring) ? recurrenceType : null,
         recurrenceDay: null,
         recordingEnabled,
-        wallet: user?.wallet,
+        wallet: address as string,
       };
+
+      console.log('Creating room with data:', roomData);
 
       const response = await createRoom(roomData, token);      
       

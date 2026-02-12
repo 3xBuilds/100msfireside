@@ -123,6 +123,7 @@ export async function createXMTPGroup(
     // Create optimistic group (stays local until members are added)
     const group = await client.conversations.createGroupOptimistic();
     
+    console.log(`Created optimistic group ${group.id} for room ${roomId}. Host wallet: ${hostWalletAddress || 'none'}`);
     // Add the host as the first member to sync the group to the network
     // This ensures the group is immediately visible to all clients
     if (hostWalletAddress) {

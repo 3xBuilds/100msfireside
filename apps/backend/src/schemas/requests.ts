@@ -30,7 +30,8 @@ export const CreateRoomProtectedRequestSchema = t.Object({
   isRecurring: t.Optional(t.Boolean()),
   recurrenceType: t.Optional(t.Union([t.Literal('daily'), t.Literal('weekly'), t.Null()])),
   recurrenceDay: t.Optional(t.Union([t.Number({ minimum: 0, maximum: 6 }), t.Null()])),
-  recordingEnabled: t.Optional(t.Boolean())
+  recordingEnabled: t.Optional(t.Boolean()),
+  wallet: t.String()
 });
 
 export const RoomUpdateRequestSchema = t.Object({

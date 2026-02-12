@@ -83,7 +83,7 @@ export default function LiveRoomList({ rooms }: LiveRoomListProps) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'live' | 'upcoming'>('live');
   const router = useRouter();
-
+  const {address} = useAccount()
   const [myUpcomingRooms, setMyUpcomingRooms] = useState<Room[]>([]);
 
   const navigate = useNavigateWithLoader()
@@ -181,7 +181,7 @@ export default function LiveRoomList({ rooms }: LiveRoomListProps) {
 
       toast.loading("Starting room...", { toastId: "starting-room" });
 
-      const response = await startRoom(roomId, user?.wallet || '', token);
+      const response = await startRoom(roomId, address as string, token);
 
       if (response.data.success) {
         const updatedRoom = response.data.data;
