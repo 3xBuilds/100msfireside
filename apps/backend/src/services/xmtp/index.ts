@@ -108,11 +108,10 @@ export async function getSystemClient(): Promise<Client> {
 }
 
 /**
- * Creates a new XMTP group for a room using optimistic creation
- * Optimistic groups are created locally and synced to network when members are added
+ * Creates a new XMTP group for a room
  * @param client - XMTP client instance
  * @param roomId - MongoDB room ID
- * @param hostWalletAddress - Optional wallet address of the room host to add as first member
+ * @param hostWalletAddress - Wallet address of the room host to add as first member (required)
  */
 export async function createXMTPGroup(
   client: Client,
@@ -120,31 +119,25 @@ export async function createXMTPGroup(
   hostWalletAddress?: string
 ): Promise<string> {
   try {
-    // Create optimistic group (stays local until members are added)
-    const group = await client.conversations.createGroupOptimistic();
-    
-    console.log(`Created optimistic group ${group.id} for room ${roomId}. Host wallet: ${hostWalletAddress || 'none'}`);
-    // Add the host as the first member to sync the group to the network
-    // This ensures the group is immediately visible to all clients
-    if (hostWalletAddress) {
-      console.log(`Adding room host ${hostWalletAddress} to group...`);
-      const hostInboxId = await getInboxIdFromAddress(client, hostWalletAddress);
-      
-      if (hostInboxId) {
-        await group.addMembers([hostInboxId]);
-        console.log(`Host ${hostWalletAddress} added to group ${group.id}`);
-      } else {
-        console.warn(`Host wallet ${hostWalletAddress} not registered on XMTP, group may not sync properly`);
-      }
+    if (!hostWalletAddress) {
+      throw new Error('Host wallet address is required to create XMTP group');
     }
+
+    console.log(`Getting inbox ID for host ${hostWalletAddress}...`);
+    const hostInboxId = await getInboxIdFromAddress(client, hostWalletAddress);
     
-    // Sync the group to ensure it's properly initialized
+    if (!hostInboxId) {
+      throw new Error(`Host wallet ${hostWalletAddress} not registered on XMTP`);
+    }
+
+    console.log(`Creating group with host ${hostWalletAddress} (inbox: ${hostInboxId})...`);
+    const group = await client.conversations.createGroup([hostInboxId]);
+    
     await group.sync();
     
-    // Cache the group conversation for immediate access
     groupCache.set(group.id, group);
     
-    console.log(`✅ XMTP optimistic group created and synced: ${group.id} for room ${roomId}`);
+    console.log(`✅ XMTP group created and published: ${group.id} for room ${roomId}`);
     
     return group.id;
   } catch (error) {
