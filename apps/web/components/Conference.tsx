@@ -32,6 +32,8 @@ import {
   fetchRoomDetails,
   endRoom,
   startRecording,
+  addMemberToXMTPGroup,
+  getXMTPGroupInfo,
 } from "@/utils/serverActions";
 
 import { HandRaiseSparks, ScrollingName } from "./experimental";
@@ -78,6 +80,12 @@ export default function Conference({ roomId }: { roomId: string }) {
 
   // Ref to track previous peers for empty room detection
   const previousPeersRef = useRef<any[]>([]);
+  
+  // Ref to track peers already added to XMTP group
+  const addedToXMTPRef = useRef<Set<string>>(new Set());
+  
+  // Ref to track if we've done initial XMTP sync for existing peers
+  const hasAddedExistingPeersRef = useRef(false);
 
   // Local state for optimistic updates
   const [peers, setPeers] = useState(allPeers);
@@ -231,6 +239,128 @@ export default function Conference({ roomId }: { roomId: string }) {
         break;
     }
   }, [notification, localPeer]);
+
+  // Handle PEER_JOINED notification - host adds new peers to XMTP group
+  useEffect(() => {
+    async function handlePeerJoined() {
+      // Only host should add members to XMTP group
+      if (!localPeer || localPeer.roleName !== "host") return;
+      if (notification?.type !== HMSNotificationTypes.PEER_JOINED) return;
+
+      const joinedPeer = notification.data;
+
+      console.log("[HMS Event - Conference] Peer joined event received", joinedPeer);
+      if (!joinedPeer || !joinedPeer.id) return;
+
+      // Skip if already added
+      if (addedToXMTPRef.current.has(joinedPeer.id)) {
+        console.log(`[XMTP] Peer ${joinedPeer.id} already added to XMTP group`);
+        return;
+      }
+
+      try {
+        // Extract wallet from peer metadata
+        const metadata = joinedPeer.metadata ? JSON.parse(joinedPeer.metadata as string) : null;
+        const wallet = metadata?.wallet;
+
+        if (!wallet) {
+          console.warn(`[XMTP] Peer ${joinedPeer.name} (${joinedPeer.id}) has no wallet in metadata, skipping XMTP add`);
+          return;
+        }
+
+        console.log(`[XMTP] Adding peer ${joinedPeer.name} (${wallet}) to XMTP group...`);
+
+        // Get auth token
+        const env = process.env.NEXT_PUBLIC_ENV;
+        let token: string | null = null;
+        if (env !== "DEV") {
+          token = (await sdk.quickAuth.getToken()).token;
+        }
+
+        // Add member to XMTP group
+        const response = await addMemberToXMTPGroup(roomId, wallet, token);
+
+        if (response.ok && response.data?.success) {
+          console.log(`[XMTP] Successfully added peer ${joinedPeer.name} to XMTP group`);
+          addedToXMTPRef.current.add(joinedPeer.id);
+        } else {
+          const errorMsg = response.data?.error || response.data?.message || 'Unknown error';
+          console.error(`[XMTP] Failed to add peer ${joinedPeer.name} to XMTP group:`, errorMsg);
+        }
+      } catch (error) {
+        console.error(`[XMTP] Error adding peer to XMTP group:`, error);
+      }
+    }
+
+    handlePeerJoined();
+  }, [notification, localPeer, roomId]);
+
+  // Handle host joining late - add all existing peers to XMTP group
+  useEffect(() => {
+    async function addExistingPeersToXMTP() {
+      // Only run once when host first joins
+      if (hasAddedExistingPeersRef.current) return;
+      
+      // Only host should add members
+      if (!localPeer || localPeer.roleName !== "host") return;
+      
+      // Wait for peers to load
+      if (allPeers.length === 0) return;
+
+      hasAddedExistingPeersRef.current = true;
+
+      try {
+        console.log(`[XMTP] Host joined, checking if XMTP group exists and adding ${allPeers.length} existing peers...`);
+
+        // Get auth token
+        const env = process.env.NEXT_PUBLIC_ENV;
+        let token: string | null = null;
+        if (env !== "DEV") {
+          token = (await sdk.quickAuth.getToken()).token;
+        }
+
+        // Check if room has XMTP group
+        const groupInfoResponse = await getXMTPGroupInfo(roomId, token);
+        if (!groupInfoResponse.ok || !groupInfoResponse.data?.success || !groupInfoResponse.data?.data?.exists) {
+          console.log('[XMTP] No XMTP group exists for this room yet, skipping bulk add');
+          return;
+        }
+
+        // Add all peers except local peer
+        for (const peer of allPeers) {
+          if (peer.isLocal) continue;
+          if (addedToXMTPRef.current.has(peer.id)) continue;
+
+          try {
+            const metadata = peer.metadata ? JSON.parse(peer.metadata as string) : null;
+            const wallet = metadata?.wallet;
+
+            if (!wallet) {
+              console.warn(`[XMTP] Peer ${peer.name} has no wallet in metadata, skipping`);
+              continue;
+            }
+
+            console.log(`[XMTP] Adding existing peer ${peer.name} (${wallet}) to XMTP group...`);
+            const response = await addMemberToXMTPGroup(roomId, wallet, token);
+
+            if (response.ok && response.data?.success) {
+              console.log(`[XMTP] Successfully added existing peer ${peer.name}`);
+              addedToXMTPRef.current.add(peer.id);
+            } else {
+              const errorMsg = response.data?.error || response.data?.message || 'Unknown error';
+              console.error(`[XMTP] Failed to add existing peer ${peer.name}:`, errorMsg);
+            }
+          } catch (error) {
+            console.error(`[XMTP] Error adding existing peer ${peer.name}:`, error);
+          }
+        }
+      } catch (error) {
+        console.error('[XMTP] Error in bulk add existing peers:', error);
+      }
+    }
+
+    addExistingPeersToXMTP();
+  }, [localPeer?.id, localPeer?.roleName, allPeers, roomId]);
 
   useEffect(() => {
     async function getRoomDetails() {

@@ -7,7 +7,7 @@ import { useGlobalContext } from "@/utils/providers/globalContext";
 import { toast } from "react-toastify";
 import sdk from "@farcaster/miniapp-sdk";
 import { MdSend } from 'react-icons/md';
-import { getXMTPGroupInfo, addMemberToXMTPGroup } from "@/utils/serverActions";
+import { getXMTPGroupInfo } from "@/utils/serverActions";
 import {
   Drawer,
   DrawerContent,
@@ -20,7 +20,6 @@ import {
   registerUserProfile, 
   type FormattedMessage 
 } from "@/utils/xmtp/messageHelpers";
-import { useAccount } from "wagmi";
 
 interface ChatProps {
   isOpen: boolean;
@@ -35,8 +34,6 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
   const [selectedReplyMessage, setSelectedReplyMessage] = useState<FormattedMessage | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const {address} = useAccount()
 
   const { user } = useGlobalContext();
   const { 
@@ -132,38 +129,44 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
         const joined = await joinGroup(xmtpGroupId);
 
         if (!joined) {
-          // User not in group yet, request to be added
-          console.log('📝 Requesting to be added to XMTP group...', roomId, token);
-          const addMemberResponse = await addMemberToXMTPGroup(roomId, address || '', token);
-
-          if (addMemberResponse.ok && addMemberResponse.data?.success) {
-            toast.success('You have been added to the chat!');
+          // User not in group yet - host should be adding them automatically
+          console.log('📝 Not in XMTP group yet, waiting for host to add...');
+          toast.info('Waiting to be added to chat by host...');
+          
+          // Retry joining after a delay (host might be adding us)
+          let retryCount = 0;
+          const maxRetries = 3;
+          const retryDelay = 3000; // 3 seconds between retries
+          
+          const retryJoinGroup = async () => {
+            retryCount++;
+            console.log(`🔄 Retry ${retryCount}/${maxRetries} - attempting to join XMTP group...`);
             
-            // Wait a moment for the group to update, then try joining again
-            setTimeout(async () => {
-              const retryJoined = await joinGroup(xmtpGroupId);
-              if (!retryJoined) {
-                toast.error('Failed to join chat. Please close and reopen the chat.');
-              }
-            }, 2000);
-          } else {
-            const errorMsg = addMemberResponse.data?.error || addMemberResponse.data?.message || 'Failed to join chat';
+            const retryJoined = await joinGroup(xmtpGroupId);
             
-            // Check for XMTP registration errors
-            if (errorMsg.includes('not registered') || errorMsg.includes('XMTP network') || errorMsg.includes('initialize your XMTP client')) {
-              toast.error('Please sign the message to enable chat...');
-              // Re-initialize client to trigger signature
-              await initializeClient();
-              // After initialization, retry the add member call
-              setTimeout(() => {
-                setupXMTPChat();
-              }, 3000);
-            } else {
-              toast.error(errorMsg);
+            if (retryJoined) {
+              console.log('✅ Successfully joined XMTP group on retry');
+              toast.success('Connected to chat!');
+              return;
             }
-          }
+            
+            if (retryCount < maxRetries) {
+              // Try again
+              setTimeout(retryJoinGroup, retryDelay);
+            } else {
+              // After max retries, offer fallback to request being added manually
+              console.log('⚠️ Failed to join after retries, offering fallback...');
+              toast.warning('Unable to join chat. Please try closing and reopening the chat.', {
+                autoClose: 5000,
+              });
+            }
+          };
+          
+          // Start retry cycle
+          setTimeout(retryJoinGroup, retryDelay);
         } else {
           console.log('✅ Successfully joined XMTP group');
+          toast.success('Connected to chat!');
         }
       } catch (error: any) {
         console.error('❌ Failed to setup XMTP chat:', error);
@@ -181,7 +184,7 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
     }
 
     setupXMTPChat();
-  }, [isOpen, roomId, client, currentGroup, joiningGroup, joinGroup, initializeClient, address]);
+  }, [isOpen, roomId, client, currentGroup, joiningGroup, joinGroup, initializeClient]);
 
   // Leave group when chat closes
   useEffect(() => {
