@@ -766,7 +766,7 @@ Retrieves all upcoming rooms hosted by the authenticated user.
             let hmsRoom: any = null;
 
             try {
-              const { name, description, startTime, topics, adsEnabled, isRecurring, recurrenceType, recordingEnabled } = body;
+              const { name, description, startTime, topics, adsEnabled, isRecurring, recurrenceType, recordingEnabled, wallet } = body;
               const userFid = headers["x-user-fid"] as string;
 
               const hostUser = await User.findOne({ fid: parseInt(userFid) });
@@ -863,7 +863,8 @@ Retrieves all upcoming rooms hosted by the authenticated user.
                   const xmtpClient = await getSystemClient();
                   const groupId = await createXMTPGroup(
                     xmtpClient,
-                    savedRoom._id.toString()
+                    savedRoom._id.toString(),
+                    wallet // Add host as first member to sync group to network
                   );
                   
                   // Update room with XMTP group ID
@@ -1094,9 +1095,10 @@ Starts recording for an ongoing room and updates the recordingEnabled flag.
         })
 
         // Start a room - create HMS room and update room info
-        .post("/start/:roomId", async ({ headers, params, set }: any) => {
+        .post("/start/:roomId", async ({ headers, params, body, set }: any) => {
           try {
             const userFid = headers["x-user-fid"] as string;
+            const { wallet } = body;
 
             if (!userFid) {
               set.status = 401;
@@ -1193,7 +1195,8 @@ Starts recording for an ongoing room and updates the recordingEnabled flag.
                 const xmtpClient = await getSystemClient();
                 const groupId = await createXMTPGroup(
                   xmtpClient,
-                  updatedRoom._id.toString()
+                  updatedRoom._id.toString(),
+                  wallet // Add host as first member to sync group to network
                 );
                 
                 // Update room with XMTP group ID

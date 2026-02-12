@@ -108,6 +108,7 @@ export default function CreateRoomModal({ isOpen, onClose }: CreateRoomModalProp
         recurrenceType: (showSchedule && isRecurring) ? recurrenceType : null,
         recurrenceDay: null,
         recordingEnabled,
+        wallet: user?.wallet,
       };
 
       const response = await createRoom(roomData, token);      

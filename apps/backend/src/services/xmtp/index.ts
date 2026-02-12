@@ -112,18 +112,29 @@ export async function getSystemClient(): Promise<Client> {
  * Optimistic groups are created locally and synced to network when members are added
  * @param client - XMTP client instance
  * @param roomId - MongoDB room ID
+ * @param hostWalletAddress - Optional wallet address of the room host to add as first member
  */
 export async function createXMTPGroup(
   client: Client,
-  roomId: string
+  roomId: string,
+  hostWalletAddress?: string
 ): Promise<string> {
   try {
     // Create optimistic group (stays local until members are added)
     const group = await client.conversations.createGroupOptimistic();
-    const inboxid = await getInboxIdFromAddress(client, "0x1ce256752fBa067675F09291d12A1f069f34f5e8"); // Force local ID generation
-
-    if(inboxid){
-      await group.addMembers([inboxid]); // Add a dummy member to trigger network sync and ID generation
+    
+    // Add the host as the first member to sync the group to the network
+    // This ensures the group is immediately visible to all clients
+    if (hostWalletAddress) {
+      console.log(`Adding room host ${hostWalletAddress} to group...`);
+      const hostInboxId = await getInboxIdFromAddress(client, hostWalletAddress);
+      
+      if (hostInboxId) {
+        await group.addMembers([hostInboxId]);
+        console.log(`Host ${hostWalletAddress} added to group ${group.id}`);
+      } else {
+        console.warn(`Host wallet ${hostWalletAddress} not registered on XMTP, group may not sync properly`);
+      }
     }
     
     // Sync the group to ensure it's properly initialized

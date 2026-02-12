@@ -181,7 +181,7 @@ export default function LiveRoomList({ rooms }: LiveRoomListProps) {
 
       toast.loading("Starting room...", { toastId: "starting-room" });
 
-      const response = await startRoom(roomId, token);
+      const response = await startRoom(roomId, user?.wallet || '', token);
 
       if (response.data.success) {
         const updatedRoom = response.data.data;

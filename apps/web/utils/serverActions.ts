@@ -409,6 +409,7 @@ export async function createRoom(roomData: {
   host: string;
   startTime: string;
   topics: string[];
+  wallet?: string;
 }, token: string | null = null) {
   const URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
   return fetchAPI(`${URL}/api/rooms/protected`, {
@@ -478,10 +479,11 @@ export async function updateRoom(
 /**
  * Start a room (create HMS room and set status to ongoing)
  */
-export async function startRoom(roomId: string, token: string | null = null) {
+export async function startRoom(roomId: string, wallet: string, token: string | null = null) {
   const URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
   return fetchAPI(`${URL}/api/rooms/protected/start/${roomId}`, {
     method: 'POST',
+    body: { wallet },
     authToken: token
   });
 }
