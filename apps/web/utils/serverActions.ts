@@ -717,6 +717,7 @@ export async function addMemberToXMTPGroup(roomId: string, wallet: string, token
   return fetchAPI(`${URL}/api/rooms/protected/${roomId}/xmtp-add-member`, {
     method: 'POST',
     body: { wallet },
-    authToken: token
+    authToken: token,
+    cache: 'no-store'
   });
 }
