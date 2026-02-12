@@ -60,9 +60,6 @@ export async function createXMTPClient(
 ): Promise<Client> {
   // Use system wallet if no credentials provided
   const wallet = getSystemWallet();
-
-  const cacheKey = wallet.address.toLowerCase();
-
   const signer = createSigner(wallet.address, wallet.privateKey);
   
   // Get encryption key from environment (required for persistent database access)
@@ -74,13 +71,30 @@ export async function createXMTPClient(
   
   const dbEncryptionKey = Buffer.from(process.env.XMTP_DB_ENCRYPTION_KEY, 'hex');
 
+  const identifier = await signer.getIdentifier();
+
+  console.log(`✅ XMTP identifier obtained for ${wallet.address}:`, identifier);
+  
+
+  const options = {
+      env:"production" as "production" | "local" | "dev",
+      appVersion: '1.0.0',
+      dbEncryptionKey,
+    }
   try {
-    const client = await Client.create(signer, {
+    let client = await Client.build(identifier, options)
+
+    if(!client){
+      console.log(`Client.build did not return a client instance, trying Client.create...`);
+    client = await Client.create(signer, {
       env:'production',
+      appVersion: '1.0.0',
       dbEncryptionKey,
     });
 
     console.log(`✅ XMTP client created for ${wallet.address}`);
+    }
+    
     
     return client;
   } catch (error) {
