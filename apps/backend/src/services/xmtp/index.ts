@@ -78,22 +78,18 @@ export async function createXMTPClient(
 
   const options = {
       env:"production" as "production" | "local" | "dev",
-      appVersion: '1.0.0',
+      appVersion: 'fireside-app/1.0.0',
       dbEncryptionKey,
     }
   try {
-    let client = await Client.build(identifier, options)
+    // let client = await Client.build(identifier, options)
 
-    if(!client){
-      console.log(`Client.build did not return a client instance, trying Client.create...`);
-    client = await Client.create(signer, {
-      env:'production',
-      appVersion: '1.0.0',
-      dbEncryptionKey,
-    });
+    // if(!client){
+    //   console.log(`Client.build did not return a client instance, trying Client.create...`);
+    let client = await Client.create(signer, options);
 
-    console.log(`✅ XMTP client created for ${wallet.address}`);
-    }
+    // console.log(`✅ XMTP client created for ${wallet.address}`);
+    // }
     
     
     return client;
