@@ -3,10 +3,34 @@
  * Utilities for formatting and handling XMTP messages in the UI
  */
 
+/**
+ * Sender metadata embedded in message content
+ */
+export interface SenderMetadata {
+  username: string;
+  pfp_url: string;
+  displayName?: string;
+  fid?: string;
+}
+
+/**
+ * Structured message content with sender metadata
+ */
+export interface MessageContent {
+  text: string;
+  sender: SenderMetadata;
+  reply?: {
+    reference: string;
+    text: string;
+    senderInboxId: string;
+    sender?: SenderMetadata;
+  };
+}
+
 export interface XMTPMessage {
   id: string;
   senderInboxId: string;
-  content: any;
+  content: string | MessageContent; // Can be plain string (legacy) or structured content
   sentAt: Date;
 }
 
@@ -72,35 +96,45 @@ export function formatXMTPMessage(
   xmtpMsg: XMTPMessage,
   currentUserInboxId?: string
 ): FormattedMessage {
-  const userProfile = getUserProfile(xmtpMsg.senderInboxId);
-
   // Extract message text and reply metadata
   let messageText = '';
   let replyTo: FormattedMessage['replyTo'] | undefined;
+  let senderMetadata: SenderMetadata | undefined;
 
   if (typeof xmtpMsg.content === 'string') {
+    // Legacy plain text message - use cache for sender info
     messageText = xmtpMsg.content;
   } else if (xmtpMsg.content?.text) {
+    // Structured message with sender metadata
     messageText = xmtpMsg.content.text;
+    senderMetadata = xmtpMsg.content.sender;
     
     // Check for reply metadata
     if (xmtpMsg.content.reply?.reference) {
-      const replyProfile = getUserProfile(xmtpMsg.content.reply.senderInboxId || '');
+      // Try to get sender info from embedded metadata first, then cache
+      const replySender = xmtpMsg.content.reply.sender || getUserProfile(xmtpMsg.content.reply.senderInboxId || '');
       replyTo = {
         messageId: xmtpMsg.content.reply.reference,
         message: xmtpMsg.content.reply.text || '',
-        username: replyProfile?.username || 'Unknown',
-        pfp_url: replyProfile?.pfp_url || '',
+        username: replySender?.username || 'Unknown',
+        pfp_url: replySender?.pfp_url || '',
       };
     }
   }
 
+  // Priority: embedded metadata > cache > fallback
+  const userProfile = getUserProfile(xmtpMsg.senderInboxId);
+  const username = senderMetadata?.username || userProfile?.username || 'Unknown';
+  const displayName = senderMetadata?.displayName || userProfile?.displayName || username;
+  const pfp_url = senderMetadata?.pfp_url || userProfile?.pfp_url || '';
+  const userId = senderMetadata?.fid || userProfile?.fid || xmtpMsg.senderInboxId;
+
   return {
     id: xmtpMsg.id,
-    userId: userProfile?.fid || xmtpMsg.senderInboxId,
-    username: userProfile?.username || 'Unknown',
-    displayName: userProfile?.displayName || userProfile?.username || 'Unknown User',
-    pfp_url: userProfile?.pfp_url || '',
+    userId,
+    username,
+    displayName,
+    pfp_url,
     message: messageText,
     timestamp: xmtpMsg.sentAt.toISOString(),
     replyTo,
@@ -122,20 +156,44 @@ export function formatXMTPMessages(
 }
 
 /**
- * Creates reply content for XMTP
+ * Creates message content with sender metadata
+ * @param text - The message text
+ * @param sender - Sender metadata (username, pfp_url, etc.)
+ */
+export function createMessageContent(
+  text: string,
+  sender: SenderMetadata
+): MessageContent {
+  return {
+    text,
+    sender,
+  };
+}
+
+/**
+ * Creates reply content for XMTP with sender metadata
  * @param replyText - The reply message text
+ * @param sender - Current user's metadata
  * @param originalMessage - The message being replied to
  */
 export function createReplyContent(
   replyText: string,
+  sender: SenderMetadata,
   originalMessage: FormattedMessage
-) {
+): MessageContent {
   return {
     text: replyText,
+    sender,
     reply: {
       reference: originalMessage.id,
       text: originalMessage.message.substring(0, 100), // Include snippet for context
       senderInboxId: originalMessage.userId,
+      sender: {
+        username: originalMessage.username,
+        pfp_url: originalMessage.pfp_url,
+        displayName: originalMessage.displayName,
+        fid: originalMessage.userId,
+      },
     },
   };
 }

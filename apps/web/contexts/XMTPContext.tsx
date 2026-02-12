@@ -5,6 +5,7 @@ import { useAccount, useWalletClient } from 'wagmi';
 import { Client, type Conversation, encodeText } from '@xmtp/browser-sdk';
 import type { Signer } from '@xmtp/browser-sdk';
 import { IdentifierKind } from '@xmtp/browser-sdk';
+import { createMessageContent, createReplyContent, type SenderMetadata, type FormattedMessage } from '@/utils/xmtp/messageHelpers';
 
 interface XMTPMessage {
   id: string;
@@ -21,8 +22,8 @@ interface XMTPContextProps {
   error: Error | null;
   initializeClient: () => Promise<void>;
   joinGroup: (groupId: string) => Promise<boolean>;
-  sendMessage: (text: string) => Promise<void>;
-  sendReply: (text: string, referenceMessageId: string) => Promise<void>;
+  sendMessage: (text: string, sender: SenderMetadata) => Promise<void>;
+  sendReply: (text: string, referenceMessage: FormattedMessage, sender: SenderMetadata) => Promise<void>;
   leaveGroup: () => void;
 }
 
@@ -184,12 +185,25 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
 
       // Load existing messages
       const groupMessages = await group.messages();
-      const formattedMessages = groupMessages.map(msg => ({
-        id: msg.id,
-        senderInboxId: msg.senderInboxId,
-        content: msg.content,
-        sentAt: msg.sentAt,
-      }));
+      const formattedMessages = groupMessages.map(msg => {
+        // Parse JSON-encoded content if it's a string
+        let parsedContent = msg.content;
+        if (typeof msg.content === 'string') {
+          try {
+            parsedContent = JSON.parse(msg.content);
+          } catch (e) {
+            // If parsing fails, it's a legacy plain text message
+            parsedContent = msg.content;
+          }
+        }
+        
+        return {
+          id: msg.id,
+          senderInboxId: msg.senderInboxId,
+          content: parsedContent,
+          sentAt: msg.sentAt,
+        };
+      });
       setMessages(formattedMessages);
 
       // Start streaming new messages from the client (not just this group)
@@ -206,10 +220,21 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
                 return prev;
               }
               
+              // Parse JSON-encoded content if it's a string
+              let parsedContent = message.content;
+              if (typeof message.content === 'string') {
+                try {
+                  parsedContent = JSON.parse(message.content);
+                } catch (e) {
+                  // If parsing fails, it's a legacy plain text message
+                  parsedContent = message.content;
+                }
+              }
+              
               return [...prev, {
                 id: message.id,
                 senderInboxId: message.senderInboxId,
-                content: message.content,
+                content: parsedContent,
                 sentAt: message.sentAt,
               }];
             });
@@ -234,40 +259,47 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
     }
   }, [client]);
 
-  // Send a text message
-  const sendMessage = useCallback(async (text: string) => {
+  // Send a text message with sender metadata
+  const sendMessage = useCallback(async (text: string, sender: SenderMetadata) => {
     if (!currentGroup) {
       throw new Error('No group joined');
     }
 
     try {
-      await currentGroup.sendText(text);
-      console.log('✅ Message sent');
+      // Create structured content with sender metadata
+      const messageContent = createMessageContent(text, sender);
+      
+      // Encode and send the structured content
+      const encodedContent = await encodeText(JSON.stringify(messageContent));
+      await currentGroup.send(encodedContent);
+      
+      console.log('✅ Message sent with sender metadata:', sender.username);
     } catch (err) {
       console.error('❌ Failed to send message:', err);
       throw err;
     }
   }, [currentGroup]);
 
-  // Send a reply to a message
-  const sendReply = useCallback(async (text: string, referenceMessageId: string) => {
+  // Send a reply to a message with sender metadata
+  const sendReply = useCallback(async (text: string, referenceMessage: FormattedMessage, sender: SenderMetadata) => {
     if (!currentGroup) {
       throw new Error('No group joined');
     }
 
     try {
-      // XMTP Browser SDK reply format
-      await currentGroup.sendReply({
-        reference: referenceMessageId,
-        referenceInboxId: client?.inboxId || '', // Assuming reply to another user's message
-        content: await encodeText(text)
-      });
-      console.log('✅ Reply sent');
+      // Create reply content with sender metadata
+      const replyContent = createReplyContent(text, sender, referenceMessage);
+      
+      // Encode and send the reply content
+      const encodedContent = await encodeText(JSON.stringify(replyContent));
+      await currentGroup.send(encodedContent);
+      
+      console.log('✅ Reply sent with sender metadata:', sender.username);
     } catch (err) {
       console.error('❌ Failed to send reply:', err);
       throw err;
     }
-  }, [currentGroup, client]);
+  }, [currentGroup]);
 
   // Leave current group and cleanup
   const leaveGroup = useCallback(() => {

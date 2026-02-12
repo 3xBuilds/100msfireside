@@ -227,7 +227,7 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
   }, [message]);
 
   const handleSendMessage = async () => {
-    if (!message.trim() || !currentGroup) return;
+    if (!message.trim() || !currentGroup || !user) return;
 
     const messageText = message.trim();
     
@@ -242,11 +242,19 @@ export default function Chat({ isOpen, setIsChatOpen, roomId }: ChatProps) {
     }, 0);
 
     try {
-      // Send via XMTP
+      // Create sender metadata from current user
+      const senderMetadata = {
+        username: user.username || 'Unknown',
+        pfp_url: user.pfp_url || '',
+        displayName: user.displayName || user.username || 'Unknown User',
+        fid: user.fid?.toString() || '',
+      };
+
+      // Send via XMTP with sender metadata
       if (replyMessage) {
-        await sendReply(messageText, replyMessage.id);
+        await sendReply(messageText, replyMessage, senderMetadata);
       } else {
-        await sendXMTPMessage(messageText);
+        await sendXMTPMessage(messageText, senderMetadata);
       }
 
       setTimeout(scrollToBottom, 100);
