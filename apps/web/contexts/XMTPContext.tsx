@@ -145,11 +145,13 @@ export function XMTPProvider({ children }: { children: ReactNode }) {
     try {
       console.log(`🔄 Searching for group ${groupId}...`);
       
-      // Sync conversations first
+      // Sync conversations first (including unknown consent state)
+      console.log('🔄 Syncing all conversations...');
       await client.conversations.syncAll();
       
       // Find the group in the user's conversations
       const conversations = await client.conversations.list();
+      console.log(`📋 Found ${conversations.length} conversations total`);
       const group = conversations.find(conv => conv.id === groupId);
 
       if (!group) {

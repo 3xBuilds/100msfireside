@@ -133,6 +133,10 @@ export async function createXMTPGroup(
     console.log(`Creating group with host ${hostWalletAddress} (inbox: ${hostInboxId})...`);
     const group = await client.conversations.createGroup([hostInboxId]);
     
+    console.log(`Sending welcome message to ensure group is published...`);
+    await group.sendText('Welcome to the room! 🎉');
+    
+    await client.conversations.sync();
     await group.sync();
     
     groupCache.set(group.id, group);
