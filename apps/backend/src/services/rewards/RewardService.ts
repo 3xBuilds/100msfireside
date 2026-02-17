@@ -29,11 +29,22 @@ export interface HostingReward {
 export class RewardService {
   private static provider: ethers.JsonRpcProvider;
   private static wallet: ethers.Wallet;
+  
+  // Circuit breaker state
+  private static circuitBreakerOpen = false;
+  private static circuitBreakerOpenedAt: Date | null = null;
+  private static consecutiveFailures = 0;
+  private static readonly CIRCUIT_BREAKER_THRESHOLD = 3;
+  private static readonly CIRCUIT_BREAKER_RESET_MS = 60000; // 1 minute
+  private static readonly MAX_RETRIES = 2;
+  private static readonly RETRY_DELAY_MS = 2000;
 
   private static initializeWeb3() {
     if (!this.provider) {
       this.provider = new ethers.JsonRpcProvider(
-        "https://base-mainnet.g.alchemy.com/v2/CA4eh0FjTxMenSW3QxTpJ7D-vWMSHVjq"
+        "https://base-mainnet.g.alchemy.com/v2/CA4eh0FjTxMenSW3QxTpJ7D-vWMSHVjq",
+        undefined,
+        { staticNetwork: true, batchMaxCount: 1 }
       );
     }
     if (!this.wallet) {
@@ -43,6 +54,49 @@ export class RewardService {
       );
       console.log('🎁 Reward wallet initialized:', this.wallet.address);
     }
+  }
+  
+  private static isCircuitBreakerOpen(): boolean {
+    if (!this.circuitBreakerOpen) return false;
+    
+    // Check if circuit breaker should reset
+    if (this.circuitBreakerOpenedAt) {
+      const elapsed = Date.now() - this.circuitBreakerOpenedAt.getTime();
+      if (elapsed >= this.CIRCUIT_BREAKER_RESET_MS) {
+        console.log('🔄 Circuit breaker reset after timeout');
+        this.circuitBreakerOpen = false;
+        this.circuitBreakerOpenedAt = null;
+        this.consecutiveFailures = 0;
+        return false;
+      }
+    }
+    return true;
+  }
+  
+  private static recordFailure(): void {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.CIRCUIT_BREAKER_THRESHOLD) {
+      this.circuitBreakerOpen = true;
+      this.circuitBreakerOpenedAt = new Date();
+      console.error(`🔴 Circuit breaker OPEN after ${this.consecutiveFailures} consecutive failures`);
+    }
+  }
+  
+  private static recordSuccess(): void {
+    this.consecutiveFailures = 0;
+  }
+  
+  private static isRateLimitError(error: any): boolean {
+    const errorMsg = error?.message || error?.toString() || '';
+    return errorMsg.includes('429') || 
+           errorMsg.includes('rate limit') || 
+           errorMsg.includes('too many requests') ||
+           errorMsg.includes('RATE_LIMIT') ||
+           error?.code === 429;
+  }
+  
+  private static async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -411,33 +465,83 @@ export class RewardService {
    * Transfer ERC20 tokens to recipient
    */
   private static async transferTokens(recipientAddress: string, amount: number): Promise<string> {
-    try {
-      this.initializeWeb3();
-
-      const tokenContract = new ethers.Contract(
-        contractAdds.fireToken,
-        erc20Abi,
-        this.wallet
-      );
-
-      // Convert amount to wei (FIRE has 18 decimals)
-      const amountWei = ethers.parseUnits(amount.toString(), 18);
-
-      console.log(`💸 Transferring ${amount} FIRE to ${recipientAddress}...`);
-
-      // Execute transfer
-      const tx = await tokenContract.transfer(recipientAddress, amountWei);
-      console.log('⏳ Transaction sent:', tx.hash);
-
-      // Wait for confirmation
-      const receipt = await tx.wait();
-      console.log('✅ Transaction confirmed:', receipt.hash);
-
-      return receipt.hash;
-    } catch (error) {
-      console.error('❌ Token transfer failed:', error);
-      throw new Error(`Token transfer failed: ${error instanceof Error ? error.message : String(error)}`);
+    // Check circuit breaker first
+    if (this.isCircuitBreakerOpen()) {
+      throw new Error('Token transfer service temporarily unavailable (circuit breaker open)');
     }
+    
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          const delay = this.RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+          console.log(`⏳ Retry attempt ${attempt}/${this.MAX_RETRIES} after ${delay}ms delay...`);
+          await this.sleep(delay);
+        }
+        
+        this.initializeWeb3();
+
+        const tokenContract = new ethers.Contract(
+          contractAdds.fireToken,
+          erc20Abi,
+          this.wallet
+        );
+
+        // Convert amount to wei (FIRE has 18 decimals)
+        const amountWei = ethers.parseUnits(amount.toString(), 18);
+
+        console.log(`💸 Transferring ${amount} FIRE to ${recipientAddress}... (attempt ${attempt + 1})`);
+
+        // Get current nonce to prevent nonce issues
+        const nonce = await this.wallet.getNonce();
+        
+        // Execute transfer with explicit nonce and gas settings
+        const tx = await tokenContract.transfer(recipientAddress, amountWei, {
+          nonce,
+          gasLimit: 100000n, // Set explicit gas limit to prevent estimation calls
+        });
+        console.log('⏳ Transaction sent:', tx.hash);
+
+        // Wait for confirmation with timeout
+        const receipt = await Promise.race([
+          tx.wait(1), // Wait for 1 confirmation
+          this.sleep(60000).then(() => { throw new Error('Transaction confirmation timeout'); })
+        ]);
+        
+        if (!receipt || !receipt.hash) {
+          throw new Error('Transaction failed - no receipt');
+        }
+        
+        console.log('✅ Transaction confirmed:', receipt.hash);
+        this.recordSuccess();
+        return receipt.hash;
+        
+      } catch (error: any) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.error(`❌ Token transfer attempt ${attempt + 1} failed:`, lastError.message);
+        
+        // If it's a rate limit error, don't retry - open circuit breaker
+        if (this.isRateLimitError(error)) {
+          console.error('🚨 Rate limit detected - opening circuit breaker immediately');
+          this.consecutiveFailures = this.CIRCUIT_BREAKER_THRESHOLD;
+          this.recordFailure();
+          throw new Error(`Token transfer failed due to rate limiting: ${lastError.message}`);
+        }
+        
+        // For nonce errors, don't retry with same nonce
+        const errorMsg = lastError.message.toLowerCase();
+        if (errorMsg.includes('nonce') || errorMsg.includes('replacement transaction')) {
+          console.error('🚨 Nonce conflict detected - aborting to prevent duplicate transactions');
+          this.recordFailure();
+          throw new Error(`Token transfer failed due to nonce conflict: ${lastError.message}`);
+        }
+      }
+    }
+    
+    // All retries exhausted
+    this.recordFailure();
+    throw new Error(`Token transfer failed after ${this.MAX_RETRIES + 1} attempts: ${lastError?.message}`);
   }
 
   /**
