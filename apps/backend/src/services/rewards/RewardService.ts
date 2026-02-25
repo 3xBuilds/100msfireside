@@ -100,6 +100,28 @@ export class RewardService {
   }
 
   /**
+   * Fetch neynar_user_score for a given FID from the Neynar API
+   */
+  private static async fetchNeynarUserScore(fid: string): Promise<number> {
+    if (!config.neynarApiKey) {
+      throw new Error('Neynar API key not configured');
+    }
+    const response = await fetch(
+      `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`,
+      { headers: { 'x-api-key': config.neynarApiKey } }
+    );
+    if (!response.ok) {
+      throw new Error(`Neynar API error: ${response.status}`);
+    }
+    const data = await response.json();
+    const score = data?.users?.[0]?.score;
+    if (typeof score !== 'number') {
+      throw new Error('Unable to retrieve Neynar user score');
+    }
+    return score;
+  }
+
+  /**
    * Check if a user is eligible for daily login reward
    */
   static async checkDailyLoginEligibility(userId: string | Types.ObjectId): Promise<DailyLoginEligibility> {
@@ -109,6 +131,17 @@ export class RewardService {
       const user = await User.findById(userId);
       if (!user) {
         return { eligible: false, message: 'User not found' };
+      }
+
+      // Check Neynar user score threshold
+      try {
+        const neynarScore = await this.fetchNeynarUserScore(user.fid);
+        if (neynarScore <= 0.51) {
+          return { eligible: false, message: `Account quality score too low to claim rewards (score: ${neynarScore.toFixed(4)})` };
+        }
+      } catch (scoreError) {
+        console.error('❌ Error fetching Neynar score during eligibility check:', scoreError);
+        return { eligible: false, message: 'Unable to verify account quality score' };
       }
 
       const now = new Date();
@@ -168,6 +201,12 @@ export class RewardService {
       const user = await User.findById(userId);
       if (!user) {
         throw new Error('User not found');
+      }
+
+      // Verify Neynar user score is above minimum threshold
+      const neynarScore = await this.fetchNeynarUserScore(user.fid);
+      if (neynarScore <= 0.51) {
+        throw new Error(`Account quality score too low to claim rewards (score: ${neynarScore.toFixed(4)})`);
       }
 
       // Calculate token amount based on USD value

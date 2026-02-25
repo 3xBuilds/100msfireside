@@ -16,6 +16,11 @@ export const authMiddleware = async ({
   request?: any;
 }) => {
   console.log("🔐 AUTH MIDDLEWARE HIT");
+
+  // Sanitize: never trust a client-supplied x-user-fid header.
+  // It must only be set by this middleware after successful auth verification.
+  delete headers["x-user-fid"];
+
   try {
     const client = createClient();
     let authorization: string | null = null;
