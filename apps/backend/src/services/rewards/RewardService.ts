@@ -8,7 +8,7 @@ import Room from "../../models/Room";
 import RoomParticipant from "../../models/RoomParticipant";
 import { erc20Abi } from "../../utils/contracts/erc20abi";
 import { contractAdds, BASE_CHAIN_ID } from "../../utils/contracts/contractAdds";
-import { getCachedTokenPrice, calculateTokenAmount } from "../../utils/token-price";
+import { fetchTokenPrice, calculateTokenAmount } from "../../utils/token-price";
 import { RedisUtils } from "../redis/redis-utils";
 
 export interface DailyLoginEligibility {
@@ -212,7 +212,7 @@ export class RewardService {
       // Calculate token amount based on USD value
       let rewardAmount: number;
       try {
-        const tokenPrice = await getCachedTokenPrice(contractAdds.fireToken);
+        const tokenPrice = await fetchTokenPrice(contractAdds.fireToken);
         rewardAmount = calculateTokenAmount(config.dailyLoginRewardUSD, tokenPrice);
         console.log(`💰 Daily login reward: $${config.dailyLoginRewardUSD} = ${rewardAmount} FIRE (price: $${tokenPrice})`);
       } catch (priceError) {
@@ -280,7 +280,7 @@ export class RewardService {
     let milestoneReward: number;
     
     try {
-      const tokenPrice = await getCachedTokenPrice(contractAdds.fireToken);
+      const tokenPrice = await fetchTokenPrice(contractAdds.fireToken);
       
       // Calculate base reward from USD value
       baseReward = calculateTokenAmount(config.hostRoomBaseRewardUSD, tokenPrice);
