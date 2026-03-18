@@ -29,6 +29,11 @@ interface Config {
   devJwtDomain?: string;
   adminToken?: string;
 
+  // Wallet Authentication
+  jwtSecret: string;
+  localWalletAddress?: string;
+  ensRpcUrl: string;
+
   // AWS/S3 Configuration
   awsRegion: string;
   awsAccessKeyId: string;
@@ -111,6 +116,11 @@ export const config = {
   devJwtDomain: getOptionalEnvVar('DEV_JWT_DOMAIN'),
   adminToken: getOptionalEnvVar('ADMIN_TOKEN'),
   localFid: getEnvNumber('LOCAL_FID', 12345678),
+
+  // Wallet Authentication
+  jwtSecret: getOptionalEnvVar('JWT_SECRET', 'dev-jwt-secret-change-in-production'),
+  localWalletAddress: getOptionalEnvVar('LOCAL_WALLET_ADDRESS', '0x0000000000000000000000000000000000000001'),
+  ensRpcUrl: getOptionalEnvVar('ENS_RPC_URL', 'https://mainnet.base.org'),
 
   // AWS/S3 Configuration
   awsRegion: getEnvVar('AWS_REGION', 'us-east-1'),

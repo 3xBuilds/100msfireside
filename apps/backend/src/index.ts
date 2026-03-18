@@ -16,6 +16,8 @@ import { roomCleanupCron, adPayoutCron } from './cron';
 import { startWebhookRetryWorker } from './workers/webhookRetryWorker';
 import { websocketRoutes } from './routes/websocket';
 import { wsManager } from './services/websocket/manager';
+import { walletAuthRoutes } from './routes/wallet-auth';
+import { walletUserRoutes } from './routes/wallet-users';
 
 const app = new Elysia();
 
@@ -170,6 +172,8 @@ app.group('/api', (app) =>
     .use(adminRoutes)
     .use(profileRoutes)
     .use(rewardRoutes)
+    .use(walletAuthRoutes)
+    .use(walletUserRoutes)
     // .use(authRoutes)
 );
 
@@ -215,6 +219,22 @@ const PORT = config.port;
     console.log('🔌 Connecting to database...');
     await connectDB();
     console.log('✅ Database connected successfully');
+
+    // Drop legacy unique index on fid (wallet users have null fid, causing duplicate key errors)
+    try {
+      const mongoose = (await import('mongoose')).default;
+      const collection = mongoose.connection.collection('users');
+      const indexes = await collection.indexes();
+      const legacyFidIndex = indexes.find(
+        (idx: any) => idx.name === 'fid_1' && idx.unique && !idx.partialFilterExpression
+      );
+      if (legacyFidIndex) {
+        await collection.dropIndex('fid_1');
+        console.log('✅ Dropped legacy fid_1 unique index');
+      }
+    } catch (indexErr) {
+      console.warn('⚠️ Could not check/drop fid index:', indexErr);
+    }
 
     console.log('♻️ Restoring pending ad rotations...');
     await restoreRoomAdRotations();

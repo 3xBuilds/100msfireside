@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia';
 import { createClient } from '@farcaster/quick-auth';
+import * as jose from 'jose';
 import { wsManager } from '../services/websocket/manager';
 import { RedisChatService, RedisRoomParticipantsService } from '../services/redis';
 import { BankrAgentService, BANKR_BOT_USER, MentionResolverService } from '../services/agent';
@@ -9,7 +10,8 @@ import config from '../config';
 
 /**
  * Authenticate a WebSocket message by verifying the JWT token.
- * Returns the user FID string on success, or null on failure.
+ * Supports both Farcaster quick-auth tokens and wallet SIWE JWTs.
+ * Returns a user identifier string on success (FID or wallet address), or null on failure.
  */
 async function authenticateToken(token: string): Promise<string | null> {
   try {
@@ -19,6 +21,26 @@ async function authenticateToken(token: string): Promise<string | null> {
 
     if (!token) return null;
 
+    // First, try wallet JWT verification (custom HS256 JWT issued by our /wallet-auth/verify)
+    try {
+      const secret = new TextEncoder().encode(config.jwtSecret);
+      const { payload } = await jose.jwtVerify(token, secret, {
+        algorithms: ['HS256'],
+        issuer: 'fireside',
+      });
+      if (payload.sub) {
+        // Wallet JWT — sub is the wallet address; look up user by walletAddress
+        const user = await User.findOne({ walletAddress: payload.sub.toLowerCase() });
+        if (user) {
+          // Return walletAddress as the user identifier
+          return payload.sub.toLowerCase();
+        }
+      }
+    } catch {
+      // Not a wallet JWT — fall through to Farcaster verification
+    }
+
+    // Fallback: Farcaster quick-auth verification
     const client = createClient();
     const verificationDomain = process.env.DEV_JWT_DOMAIN as string;
 
@@ -60,23 +82,26 @@ async function handleSendMessage(
   }
 
   // Authenticate
-  const userFid = await authenticateToken(token);
-  if (!userFid) {
+  const userId = await authenticateToken(token);
+  if (!userId) {
     console.log(`[WS] Authentication failed for send_message in room ${roomId}`);
     wsManager.sendTo(ws, 'error', { error: 'Authentication failed' });
     return;
   }
 
   // Verify user is a room participant
-  const participant = await RedisRoomParticipantsService.getParticipant(roomId, userFid);
+  const participant = await RedisRoomParticipantsService.getParticipant(roomId, userId);
   if (!participant) {
-    console.log(`[WS] User ${userFid} is not a participant in room ${roomId}`);
+    console.log(`[WS] User ${userId} is not a participant in room ${roomId}`);
     wsManager.sendTo(ws, 'error', { error: 'User must be in the room to send messages' });
     return;
   }
 
-  // Fetch user data
-  const user = await User.findOne({ fid: parseInt(userFid) });
+  // Fetch user data — try by FID first, then by wallet address
+  const fidNum = parseInt(userId);
+  let user = Number.isNaN(fidNum) 
+    ? await User.findOne({ walletAddress: userId.toLowerCase() })
+    : await User.findOne({ fid: fidNum });
   if (!user) {
     wsManager.sendTo(ws, 'error', { error: 'User not found' });
     return;
@@ -170,7 +195,7 @@ async function handleSendMessage(
                   status: 'pending'
                 };
               });
-              updateData.prompterFid = userFid;
+              updateData.prompterFid = userId;
               console.log(`[Bankr AI] Response includes ${result.transactions.length} transaction(s)`);
             }
 

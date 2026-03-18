@@ -1,0 +1,11 @@
+/* progressbar-orange.css */
+#nprogress .bar {
+  background: rgb(255, 145, 0) !important;
+}
+#nprogress .peg {
+  box-shadow: 0 0 10px rgb(255, 145, 0), 0 0 5px rgb(255, 145, 0) !important;
+}
+#nprogress .spinner-icon {
+  border-top-color: rgb(255, 145, 0) !important;
+  border-left-color: rgb(255, 145, 0) !important;
+}

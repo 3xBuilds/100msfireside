@@ -2,12 +2,15 @@ import mongoose, { Schema, Document } from 'mongoose';
 import type { User } from '../schemas';
 
 const User: Schema = new Schema({
-  fid: { type: String, required: true, unique: true },
+  fid: { type: String, required: false },
+  walletAddress: { type: String, unique: true, sparse: true, index: true },
   username: { type: String, required: true },
   displayName: { type: String, required: true },
-  wallet: { type: String, required: true },
-  pfp_url: { type: String, required: true },
+  wallet: { type: String, required: false },
+  pfp_url: { type: String, required: false, default: '' },
   bio: { type: String, required: false },
+  ensName: { type: String, required: false },
+  ensAvatar: { type: String, required: false },
   topics: [{ type: String, default: [] }],
   token: { type: String, required: false },
   socials: { type: Map, of: String, required: false },
@@ -35,5 +38,8 @@ const User: Schema = new Schema({
 },{
   timestamps: true
 });
+
+// Unique index on fid only when it actually exists and is not null
+User.index({ fid: 1 }, { unique: true, partialFilterExpression: { fid: { $type: 'string' } } });
 
 export default mongoose.models.User || mongoose.model('User', User);
