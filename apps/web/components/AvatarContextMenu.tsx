@@ -93,6 +93,7 @@ export default function AvatarContextMenu({ peer, isVisible, onClose, onOpenTipD
         const userFid = metadata?.fid;
         
         if (userFid) {
+          
           const response = await fetch(`${URL}/api/rooms/role`, {
             method: 'POST',
             headers: {
